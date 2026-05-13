@@ -123,3 +123,7 @@ dist
 # more to ignore
 .vscode/
 .idea/
+vscode/
+idea
+.vscode
+.idea
