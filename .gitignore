@@ -120,6 +120,6 @@ dist
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Node
 /source/generated/prisma
  
- # more to ignore
- .vscode
- .idea
+# more to ignore
+.vscode/
+.idea/
