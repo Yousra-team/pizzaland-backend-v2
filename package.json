@@ -1,0 +1,37 @@
+{
+  "name": "pizzaland-backend-v2",
+  "version": "2.0.0",
+  "description": "This is the latest version of the pizzaland APIs",
+  "homepage": "https://github.com/Yousra-team/pizzaland-backend-v2#readme",
+  "bugs": {
+    "url": "https://github.com/Yousra-team/pizzaland-backend-v2/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yousra-team/pizzaland-backend-v2.git"
+  },
+  "license": "ISC",
+  "author": "Yousra Company",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx watch source/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.5",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.8.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "prisma": "^7.8.0"
+  }
+}
