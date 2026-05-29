@@ -1,0 +1,25 @@
+Ok I want you to create the better version of my original design , that is all the issues that you found , correct it and create a new a design that I will download and use , but we must clear certain things first to avoid unnecessary mistakes. 
+
+
+
+I do not understand te first issue relating to total , yes it is an error to store as string but I believe we need to know how much an order cost , where are we to store such a value?
+
+
+
+the second issue you are right , i included customer id because most users logged in will order but there is also a scenario where the cashier  or a waitress will make an order for a customer that has no account , we might want to store their names at least
+
+
+
+
+
+In our case , a menu is a collection of products , a product can be fried chicken , and another burger , menu B1 is fried chicken + Burger , hence a menu is a colelction of one or more products but it is important we have station ids because when the order arrives in the kitchen it will be routed to the different kitchen station ( the individual product items )
+
+
+
+
+
+Normally the deliverer targets employee , I have an employee tables with roles , the roles are  admin , cashier , waiter , deliverer ( the person who ships orders ) , manager , kitchen chef and kitchen chef for station ( I did not find  a simple name for kitchen staffs who work at a station )
+
+
+
+fifth issue there is no mistake as far as I am concerned the shipping address type is foreign key it links back to the shipping address table , the order has no shipping address field only branch because some orders

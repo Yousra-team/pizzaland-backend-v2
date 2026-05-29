@@ -1,13 +1,37 @@
 {
-  "extends": "@tsconfig/node22/tsconfig.json",
   "compilerOptions": {
-   // "rootDir": "./source",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2023",
+    "strict": true,
+    "esModuleInterop": true,
+    "ignoreDeprecations": "6.0",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
     "outDir": "./dist",
-   "forceConsistentCasingInFileNames": true,
+
+  },
+  "include": ["source/**/*" ,"prisma.config.ts" ],
+  "exclude": ["node_modules", "dist"]
+}
+
+//{
+ /* "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    "rootDir": "./source",
+    "outDir": "./dist",
+
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-  },
-  "include": ["source", "prisma.config.ts"],
-  "exclude": ["node_modules" , "dist"]
-}
+
+    "forceConsistentCasingInFileNames": true
+  },*/
+  //"include": ["source/**/*" ],
+ // "exclude": ["node_modules", "dist"]
+//}
+

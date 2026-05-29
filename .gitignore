@@ -123,3 +123,9 @@ dist
 # more to ignore
 .vscode/
 .idea/
+
+/source/generated/prisma
+
+/source/generated/prisma
+
+/generated/prisma

@@ -11,3 +11,492 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum Role {
+  ADMIN
+  CASHIER
+  KITCHEN_STAFF
+  KITCHEN_CHEF
+  DELIVERY_DRIVER
+  WAITER
+  MANAGER
+}
+
+enum benefit_type {
+  percentage_discount
+  fixed_amount_discount
+  free_delivery
+  free_product
+}
+
+enum condition_type {
+  promo_code
+  shipping_address
+  specific_product
+  specific_menu
+  minimum_order_amount
+  first_time_customers
+  subcategory
+  category
+  product_quantity
+}
+
+
+model Customers {
+  phone    String   @id
+  firstName String
+  lastName  String
+  email     String   @unique
+  isVerified Boolean  @default(false)
+  Account  Accounts?
+  orders Orders[]
+  reservations Reservations[]
+  promotions Promotion_usage[]
+  addresses Address[]
+  favorites Favorites[]
+  reviews Reviews[] 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Address {
+  id         String   @id @default(uuid())
+  slug       String   @unique
+  customer   Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  shippingAddress shippingAddresses @relation(fields: [shipping_address_name], references: [name])
+  shipping_address_name String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerPhone])
+}
+
+model Accounts {
+  customerPhone String @id @unique
+  balance       Float    @default(0)
+  customer      Customers @relation(fields: [customerPhone], references: [phone])
+  createdAt     DateTime @default(now())
+
+}
+
+model Favorites {
+  id          String   @id @default(uuid())
+  customer     Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  product     Products @relation(fields: [productId], references: [id])
+  productId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerPhone])
+  @@index([productId])
+}
+
+model Reviews {
+  id          String   @id @default(uuid())
+  customer     Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  product     Products @relation(fields: [productId], references: [id])
+  productId   String
+  rating      Int
+  comment     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerPhone])
+  @@index([productId])
+
+}
+
+model Employees {
+  email     String   @id 
+  firstName String
+  lastName  String?
+  phone     String   @unique
+  password  String
+  role      Role  
+  branch    Branches? @relation(fields: [branchId], references: [id]) // admin does not have a branch
+  branchId  String?
+  isVerified Boolean  @default(false)
+  stationSessions Station_sessions[]
+  delivery Deliveries[]
+  orders Orders[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([branchId])
+}
+
+
+model Branches {
+  id        String   @id @default(uuid())
+  name      String
+  region    String
+  city      String
+  neighborhood String
+  contactEmail String?
+  contactPhone String?
+  employees Employees[]
+  shippingAddresses shippingAddresses[]
+  stations Stations[]
+  orders Orders[]
+  reservations Reservations[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  image_url String?
+  image_public_id String?
+  products    Products[]
+  subcategories SubCategory[]
+  menus        Menu[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SubCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  image_url String?
+  image_public_id String?
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  products    Products[]
+  menus       Menu[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+model Products {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  category    Category @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  subCategory SubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+  station    Stations @relation(fields: [stationId], references: [id])
+  stationId  String
+  price       Float
+  image_url String
+  image_public_id String
+  popularity  Int
+  preparationTime Int
+  variants    Variants[]
+  menuItems   MenuItems[]
+  orderItems   OrderItems[]
+  favorites   Favorites[]
+  reviews   Reviews[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([subCategoryId])
+  @@index([stationId])
+
+
+}
+
+model Menu {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  price      Float
+  category    Category @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  subcategory SubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId String
+  image_url String
+  image_public_id String
+  preparationTime Int?
+  items       MenuItems[]
+  orderItems   OrderItems[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([categoryId])
+  @@index([subCategoryId])
+}
+// I want to later know if I can make a relation field optional
+model Variants {
+  id          String   @id @default(uuid())
+  name        String
+  price       Float
+  product     Products @relation(fields: [productId], references: [id])
+  productId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model MenuItems {
+  id          String   @id @default(uuid())
+  menu        Menu @relation(fields: [menuId], references: [id])
+  menuId      String
+  product     Products @relation(fields: [productId], references: [id])
+  productId   String
+  quantity    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  
+  @@index([menuId])
+  @@index([productId])
+}
+
+model Stations {
+  id        String   @id @default(uuid())
+  name      String
+  description String
+  products   Products[]
+  branch    Branches @relation(fields: [branchId], references: [id])
+  branchId String
+  stationSessions Station_sessions[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([branchId])
+}
+// Should it be station or station_sessions that has a relationship with branch   
+model Station_sessions {
+  id        String   @id @default(uuid())
+  station   Stations @relation(fields: [stationId], references: [id])
+  stationId String
+  kitchen_staff Employees @relation(fields: [kitchenStaffEmail], references: [email])
+  kitchenStaffEmail String
+  startTime DateTime
+  endTime   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([stationId])
+  @@index([kitchenStaffEmail])
+}
+
+model shippingAddresses {
+  name          String   @id 
+  region     String
+  city        String
+  neighborhood String 
+  delivery_fee Float
+  delivery_time Int
+  branch    Branches @relation(fields: [branchId], references: [id])
+  branchId String
+  deliveries Deliveries[]
+  addresses Address[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([branchId])
+}
+
+model Orders {
+  order_number String   @id @default(uuid())
+  branch       Branches @relation(fields: [branchId], references: [id])
+  branchId     String
+  cashier      Employees @relation(fields: [cashierEmail], references: [email])
+  cashierEmail String
+  customer     Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  cust_name    String // snapshot of customer's name at the time of order and for guest customers
+  status       orderStatus?
+  items        OrderItems[]
+  delivery     Deliveries[]
+  pickupOrders pickupOrders[]
+  dineInOrders dineInOrders[]
+  orderPayments orderPayments[]
+  promotions Promotion_usage[]
+  total_price  Float
+
+  @@index([customerPhone])
+  @@index([cashierEmail])
+  @@index([branchId])
+}
+
+model OrderItems {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String
+  product     Products? @relation(fields: [productId], references: [id])
+  productId   String?
+  menu        Menu? @relation(fields: [menuId], references: [id])
+  menuId      String?
+  quantity    Int
+  price       Float
+  status      String
+  estimated_ready_at DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order_number])
+}
+
+model  Deliveries {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String
+  driver      Employees @relation(fields: [driverEmail], references: [email])
+  driverEmail String
+  status      String
+  estimated_delivery_time DateTime
+  actual_delivery_time DateTime?
+  shippingAddress shippingAddresses @relation(fields: [shipping_address], references: [name])
+  shipping_address String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order_number])
+}
+
+model pickupOrders {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String
+  pickup_time DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order_number])
+}
+
+model dineInOrders {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String
+  table_number Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([order_number])
+}
+
+model orderStatus {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String @unique
+  value    String
+  updatedAt   DateTime @updatedAt
+}
+
+model orderPayments {
+  id          String   @id @default(uuid())
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String @unique
+  amount      Float
+  method      String
+  provider    String @default("MonetBill")
+  status      String
+  monetbillTransaction monetbillTransaction?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model monetbillTransaction {
+  id          String   @id @default(uuid())
+  orderPayment orderPayments @relation(fields: [orderPaymentId], references: [id])
+  orderPaymentId String @unique
+  reference   String
+  transaction_id String
+  transaction_uuid String
+  amount      Float
+  fee         Float
+  currency   String
+  provider    String 
+  status      String
+  customer_name String
+  customer_number String
+  message    String?
+  mccmc     String?
+  operator  String?
+  operator_code String?
+  operator_transaction_id String?
+  sign        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Reservations {
+  id          String   @id @default(uuid())
+  customer     Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  reservation_date DateTime
+  reservation_time DateTime
+  comments   String?
+  branch    Branches @relation(fields: [branchId], references: [id])
+  branchId      String
+  number_of_people Int
+  status       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([customerPhone])
+  @@index([branchId])
+}
+
+model Promotion {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  description String
+  start_date DateTime
+  end_date DateTime
+  is_active Boolean @default(true)
+  max_uses Int
+  used_count Int @default(0)
+  combination_mode String
+
+  promotion_conditions Promotion_condition[]
+  promotion_benefits Promotion_benefit[]
+  promotion_usages Promotion_usage[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Promotion_condition {
+  id        String   @id @default(uuid())
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  promotionId String
+  type        condition_type
+  value       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([promotionId])
+}
+
+
+model Promotion_benefit {
+  id        String   @id @default(uuid())
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  promotionId String
+  type        benefit_type
+  value       Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([promotionId])
+}
+
+model Promotion_usage {
+  id        String   @id @default(uuid())
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  promotionId String
+  order       Orders @relation(fields: [order_number], references: [order_number])
+  order_number String
+  customer     Customers @relation(fields: [customerPhone], references: [phone])
+  customerPhone String
+  used_at DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([promotionId])
+  @@index([order_number])
+  @@index([customerPhone])
+}
