@@ -71,6 +71,7 @@ web_modules/
 
 # dotenv environment variables file
 .env
+.env.dev
 .env.test
 .env.production
 
@@ -123,6 +124,8 @@ dist
 # more to ignore
 .vscode/
 .idea/
+mock/
+/mock/
 
 /source/generated/prisma
 

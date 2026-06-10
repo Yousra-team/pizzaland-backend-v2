@@ -2,7 +2,10 @@ import { Router } from "express";
 
 const router = Router();
 
-router.route("/").get();
+router.get("/", (req, res) => {
+    res.send("Get all products");
+});
+
 
 
 

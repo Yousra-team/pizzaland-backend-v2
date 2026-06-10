@@ -17,7 +17,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "dotenv -e .env.dev -- tsx watch source/server.ts",
-    "prisma" : "dotenv -e .env.dev -- npx prisma db push",
+    "prisma": "dotenv -e .env.dev -- npx prisma db push && dotenv -e .env.dev -- npx prisma generate",
     "studio": "dotenv -e .env.dev -- npx prisma studio",
     "build": "tsc",
     "start": "dotenv -e .env.dev -- node dist/server.js"
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^25.7.0",
     "@types/pg": "^8.20.0",
     "dotenv-cli": "^11.0.0",
@@ -35,9 +36,13 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "pg": "^8.21.0"
+    "multer": "^2.1.1",
+    "multer-storage-cloudinary": "^4.0.0",
+    "pg": "^8.21.0",
+    "streamifier": "^0.1.1"
   }
 }
