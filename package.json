@@ -16,11 +16,13 @@
   "main": "dist/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "dotenv -e .env.dev -- tsx watch source/server.ts",
-    "prisma": "dotenv -e .env.dev -- npx prisma db push && dotenv -e .env.dev -- npx prisma generate",
-    "studio": "dotenv -e .env.dev -- npx prisma studio",
+    "dev": "doppler run -- tsx watch source/server.ts",
+    "prisma": "doppler run -- npx prisma db push && doppler run -- npx prisma generate",
+    "prisma:generate": "doppler run -- npx prisma generate",
+    "prisma:push": "doppler run -- npx prisma db push",
+    "studio": "doppler run -- npx prisma studio",
     "build": "tsc",
-    "start": "dotenv -e .env.dev -- node dist/server.js"
+    "start": "doppler run -- node dist/server.js"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",

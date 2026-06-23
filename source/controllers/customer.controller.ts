@@ -1,4 +1,4 @@
-import {prisma} from "../lib/prisma";
+﻿import {prisma} from "../lib/prisma";
 import {Request, Response} from "express";
 
 
@@ -7,13 +7,16 @@ interface Customer {
     lastName: string;
     email: string;
     dateOfBirth: Date;
+    phone: string;
+    gender : "Male" | "Female" | "Other";
+    address?: string;
 }
 
-type Gender = "male" | "female" | "other";
+
 
 const createCustomer = async (req: Request, res: Response): Promise<void> => {
     try{
-        const {firstName , lastName , email , phone, dateOfBirth, gender} = req.body;
+        const {firstName , lastName , email , phone, dateOfBirth, gender, address} : Customer = req.body;
 
         const existingCustomer = await prisma.customers.findUnique({
             where: {
@@ -30,8 +33,12 @@ const createCustomer = async (req: Request, res: Response): Promise<void> => {
                 lastName,
                 email,
                 phone,
+                dateOfBirth,
+                gender,
+                address
             },
         });
+
          res.status(201).json(newCustomer);
 
 
@@ -40,12 +47,52 @@ const createCustomer = async (req: Request, res: Response): Promise<void> => {
         res.status(500).json({ error: "Failed to create customer" });
     }
 
-}
+};
 
-const getAllCustomers = async (req: Request, res: Response) => {
+const createManyCustomers = async (req: Request, res: Response): Promise<void> => {
+    // For testing purposes, you can send an array of customers in the request body to create multiple customers at once.
+    try{
+        const customers: Customer[] = req.body;
+
+        const createdCustomers = await prisma.customers.createMany({
+            data: customers,
+            skipDuplicates: true, // This will skip any duplicate entries based on unique constraints
+        });
+        res.status(201).json(createdCustomers);
+
+    }catch(error){
+        console.error("Error creating many customers:", error);
+        res.status(500).json({ error: "Failed to create many customers" });
+    }
+};
+
+const getCustomers = async (req: Request, res: Response): Promise<void> => {
+
     try {
-        const customers = await prisma.customers.findMany();    
-        return res.status(200).json(customers);
+           
+        const { gender, address, dateOfBirth } = req.query;
+
+        let filter: any = {};
+
+        if (gender) {
+            filter.gender = gender;
+        }
+    
+        if (address) {
+            filter.address = {
+                contains: address as string,
+            };
+        }
+
+        if (dateOfBirth) {
+            filter.dateOfBirth = new Date(dateOfBirth as string);
+        }
+
+        const customers = await prisma.customers.findMany({
+            where: filter
+        });
+        res.status(200).json(customers);
+
     } catch (error) {
         console.error("Error fetching customers:", error);
         res.status(500).json({ error: "Failed to fetch customers" });
@@ -53,10 +100,31 @@ const getAllCustomers = async (req: Request, res: Response) => {
 
 };
 
+const getCustomerByPhone = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { phone } = req.params;
+
+        const customer = await prisma.customers.findUnique({
+            where: {
+                phone: phone,
+            },
+        });
+
+        if (!customer) {
+         res.status(404).json({ error: "Customer not found" });
+        }
+
+        res.status(200).json(customer);
+    } catch (error) {
+        console.error("Error fetching customer by phone:", error);
+        res.status(500).json({ error: "Failed to fetch customer by phone" });
+    }
+};
+
 const updateCustomer = async (req: Request, res: Response): Promise<void> => {
     try {
         const { phone } = req.params;
-        const { firstName, lastName, email , dateOfBirth  }  = req.body;
+        const { firstName, lastName, email , dateOfBirth, gender } : Customer = req.body;
         const  updatedCustomer = await prisma.customers.update({
             where: {
                 phone: phone,
@@ -66,7 +134,7 @@ const updateCustomer = async (req: Request, res: Response): Promise<void> => {
                 lastName,
                 email,
                 dateOfBirth,
-                gender,
+                gender
             },
         });
         res.status(200).json(updatedCustomer);
@@ -76,12 +144,15 @@ const updateCustomer = async (req: Request, res: Response): Promise<void> => {
 
 
     } catch (error) {
-
+        console.error("Error updating customer:", error);
+        res.status(500).json({ error: "Failed to update customer" });
     }
-}
+};
 
 export {
     createCustomer,
-    getAllCustomers,
-    updateCustomer
-}
+    getCustomers,
+    getCustomerByPhone,
+    updateCustomer,
+    createManyCustomers
+};
