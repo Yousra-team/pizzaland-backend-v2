@@ -19,7 +19,10 @@ const createBranch = async (req: Request, res: Response): Promise<void> => {
                 name,
                 region,
                 city,
-                neighborhood
+                neighborhood // governance
+                // ai persona
+                //organizational resources to achieve goals 
+                // continual improvement at all levels
             }
         });
 

@@ -1,13 +1,10 @@
 import { Router } from "express";
+import upload from "../middlewares/upload";
+import { createProduct } from "../controllers/product.controller";
 
 const router = Router();
 
-router.get("/", (req, res) => {
-    res.send("Get all products");
-});
-
-
-
+router.post("/" , upload.single("image") , createProduct);
 
 
 export default router;

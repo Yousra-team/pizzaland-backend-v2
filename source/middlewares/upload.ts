@@ -1,14 +1,6 @@
-/*import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
-import cloudinary from "../lib/cloudinary";
+import multer, {memoryStorage} from "multer";
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "yousra",
-    allowed_formats: ["jpg", "png", "jpeg", "webp"],
-  },
-});
+const storage = memoryStorage();
+const upload = multer({storage: storage});
 
-export const uploadSingle = multer({ storage }).single("image");
-*/
+export default upload;
