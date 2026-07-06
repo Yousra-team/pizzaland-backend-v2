@@ -261,18 +261,18 @@ model SubCategory {
 model Products {
   id              String      @id @default(uuid())
   name            String
-  description     String
+  description     String?
   category        Category    @relation(fields: [categoryId], references: [id])
   categoryId      String      @map("category_id")
-  subCategory     SubCategory @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String      @map("sub_category_id")
-  station         Stations    @relation(fields: [stationId], references: [id])
-  stationId       String      @map("station_id")
+  subCategory     SubCategory? @relation(fields: [subCategoryId], references: [id])
+  subCategoryId   String?     @map("sub_category_id")
+  station         Stations?    @relation(fields: [stationId], references: [id])
+  stationId       String?     @map("station_id")
   price           Float
-  imageUrl        String      @map("image_url")
-  imagePublicId   String      @map("image_public_id")
-  popularity      Int
-  preparationTime Int         @map("preparation_time")
+  imageUrl        String?     @map("image_url")
+  imagePublicId   String?     @map("image_public_id")
+  popularity      Int?
+  preparationTime Int?        @map("preparation_time")
   variants        ProductVariants[]
   menuItems       MenuItems[]
   orderItems      OrderItems[]

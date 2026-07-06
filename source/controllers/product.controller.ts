@@ -8,16 +8,16 @@ interface Product {
     price: number;
     imageUrl: string;
     categoryId: string;
-    subcategoryId: string;
+    subCategoryId: string;
     popularity: number;
-    preparation_time: number;
+    preparationTime: number;
 
 };
 
 const createProduct = async (req: Request, res: Response): Promise<void> => {
     try {
          
-        const { name, description, price, categoryId, subcategoryId, popularity, preparation_time } = req.body;
+        const { name, description, price, categoryId, subCategoryId, popularity, preparationTime }: Product = req.body;
         const file = req.file;
 
         if (!file) {
@@ -36,9 +36,9 @@ const createProduct = async (req: Request, res: Response): Promise<void> => {
           price,
           imageUrl,
           categoryId,
-          subcategoryId,
+          subCategoryId,
           popularity,
-          preparation_time
+         preparationTime
         }
       });
 
