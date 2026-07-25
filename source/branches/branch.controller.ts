@@ -1,37 +1,37 @@
 
 import {prisma} from "../lib/prisma";
 import {Request, Response} from "express";
+import * as Z from "zod";
 
-interface branch {
-    name: string;
-    region: string;
-    city: string;
-    neighborhood: string;
-}
+
+const branchSchema = Z.object({
+    name: Z.string().min(1, "Name is required"),
+    region: Z.string().min(1, "Region is required"),
+    city: Z.string().min(1, "City is required"),
+    neighborhood: Z.string().min(1, "Neighborhood is required")
+});
+
 
 
 const createBranch = async (req: Request, res: Response): Promise<void> => {
-     try {
-        const { name, region, city, neighborhood}: branch = req.body;
+    try {
+        const { name, region, city, neighborhood} = branchSchema.parse(req.body);
 
         const newBranch = await prisma.branches.create({
             data: {
                 name,
                 region,
                 city,
-                neighborhood // governance
-                // ai persona
-                //organizational resources to achieve goals 
-                // continual improvement at all levels
+                neighborhood,
             }
         });
 
         res.status(201).json(newBranch);
 
-     } catch (error) {
+    } catch (error) {
         console.error("Error creating branch:", error);
         res.status(500).json({ error: "Failed to create branch" });
-     };
+    };
 };
 
 const getBranches = async (req: Request, res: Response): Promise<void> => {

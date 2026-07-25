@@ -25,6 +25,19 @@ enum Role {
   DELIVERY_DRIVER
   WAITER
   MANAGER
+  DEVELOPER
+  MARKETING
+  HR
+  FINANCE
+  CONTROLLER
+}
+
+enum paymentMethods {
+  CASH
+  MONETBIL
+  CARD
+  PAYPAL
+  PAYROLL_DEDUCTION
 }
 
 enum BenefitType {
@@ -32,7 +45,6 @@ enum BenefitType {
   fixed_amount_discount
   free_delivery
   free_product
-
 }
 
 enum ConditionType {
@@ -45,23 +57,18 @@ enum ConditionType {
   subcategory
   category
   product_quantity
-
 }
 
 enum Gender {
   Male
   Female
   Other
-
- 
 }
 
 enum CombinationMode {
   AND
   OR
   ANY
-
-  
 }
 
 enum OrderItemStatus {
@@ -70,12 +77,11 @@ enum OrderItemStatus {
   ready
   delivered
   cancelled
-
-  
 }
 
 enum orderstatus {
   pending
+  kitchen
   confirmed
   preparing
   ready
@@ -83,7 +89,6 @@ enum orderstatus {
   out_for_delivery
   delivered
   cancelled
-
 }
 
 enum DeliveryStatus {
@@ -92,8 +97,6 @@ enum DeliveryStatus {
   in_transit
   delivered
   failed
-
- 
 }
 
 enum ReservationStatus {
@@ -102,31 +105,85 @@ enum ReservationStatus {
   seated
   completed
   cancelled
+}
 
+enum tokenType {
+  refreshToken
+  verificationToken
+  passwordresetToken
+  sessionToken
+}
 
+enum preferenceName {
+  preferredPaymentMethod
+  preferredDeliveryAddress
+  preferredLanguage
+  preferredCurrency
+  favoriteCategory
+  favoriteSubcategory
+  favoriteProduct
+  favoriteMenu
+  notificationPreferences
+  marketingOptIn
 }
 
 // ─── Customer domain ──────────────────────────────────────────────────────────
 
 model Customers {
-  phone         String    @id
-  firstName     String    @map("first_name")
-  lastName      String    @map("last_name")
-  email         String?    @unique
-  gender        Gender?
-  dateOfBirth   DateTime? @map("date_of_birth")
-  verified      Boolean   @default(false)
-  accounts       Accounts?
-  orders        Orders[]
-  reservations  Reservations[]
-  promotions    PromotionUsage[]
-  addresses     Address[]
-  favorites     Favorites[]
-  reviews       Reviews[]
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  phone           String            @id
+  firstName       String            @map("first_name")
+  lastName        String?           @map("last_name")
+  email           String?           @unique
+  gender          Gender?
+  dateOfBirth     DateTime?         @map("date_of_birth")
+  verified        Boolean           @default(false)
+  accounts        Accounts?
+  orders          Orders[]
+  reservations    Reservations[]
+  promotions      PromotionUsage[]
+  addresses       Address[]
+  favorites       Favorites[]
+  reviews         Reviews[]
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  tokens          Token[]
+  userPreferences UserPreferences[]
 
   @@map("customers")
+}
+
+model UserPreferences {
+  id            String         @id @default(uuid())
+  customer      Customers?     @relation(fields: [customerPhone], references: [phone])
+  customerPhone String?        @map("customer_phone")
+  employee      Employees?     @relation(fields: [employeeEmail], references: [email])
+  employeeEmail String?        @map("employee_email")
+  name          preferenceName
+  value         String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  @@unique([customerPhone, name]) // one preference of each type per customer
+  @@index([customerPhone])
+  @@map("user_preferences")
+}
+
+model Token {
+  token         String     @id
+  customer      Customers? @relation(fields: [customerPhone], references: [phone])
+  customerPhone String?    @map("customer_phone")
+  employee      Employees? @relation(fields: [employeeEmail], references: [email])
+  employeeEmail String?    @map("employee_email")
+  employeeRole  Role?      @map("employee_role")
+  type          tokenType
+  revoked       Boolean    @default(false)
+  expiresAt     DateTime   @map("expires_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  @@index([customerPhone])
+  @@index([employeeEmail])
+  @@map("tokens")
 }
 
 model Accounts {
@@ -137,8 +194,6 @@ model Accounts {
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("accounts")
-
-  
 }
 
 model Address {
@@ -152,7 +207,6 @@ model Address {
 
   @@index([customerPhone])
   @@map("addresses")
-  
 }
 
 model Favorites {
@@ -188,38 +242,44 @@ model Reviews {
 // ─── Employee & branch domain ─────────────────────────────────────────────────
 
 model Employees {
-  email           String           @id
-  firstName       String           @map("first_name")
-  lastName        String?          @map("last_name")
-  phone           String           @unique
+  email           String            @id
+  firstName       String            @map("first_name")
+  lastName        String?           @map("last_name")
+  phone           String            @unique
   password        String
   role            Role
-  branch          Branches?        @relation(fields: [branchId], references: [id])
-  branchId        String?          @map("branch_id")
-  verified        Boolean          @default(false)
+  branch          Branches?         @relation("BranchEmployees", fields: [branchId], references: [id])
+  branchId        String?           @map("branch_id")
+  managedBranch   Branches?         @relation("BranchManager")
+  verified        Boolean           @default(false)
   stationSessions StationSessions[]
   deliveries      Deliveries[]
-  orders          Orders[]
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  cashierOrders   Orders[]          @relation("CashierOrders")
+  employeeOrders  Orders[]          @relation("EmployeeOrders")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  tokens          Token[]
+  userPreferences UserPreferences[]
 
   @@index([branchId])
   @@map("employees")
 }
 
 model Branches {
-  id               String              @id @default(uuid())
-  name             String
-  region           String
-  city             String
-  neighborhood     String
-  employees        Employees[]
+  id                String              @id @default(uuid())
+  name              String
+  region            String
+  city              String
+  neighborhood      String
+  manager           Employees?          @relation("BranchManager", fields: [managerEmail], references: [email])
+  managerEmail      String?             @unique @map("manager_email")
+  employees         Employees[]         @relation("BranchEmployees")
   shippingAddresses ShippingAddresses[]
-  stations         Stations[]
-  orders           Orders[]
-  reservations     Reservations[]
-  createdAt        DateTime            @default(now()) @map("created_at")
-  updatedAt        DateTime            @updatedAt @map("updated_at")
+  stations          Stations[]
+  orders            Orders[]
+  reservations      Reservations[]
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   @@map("branches")
 }
@@ -228,16 +288,16 @@ model Branches {
 
 model Category {
   // make the name of categories as id
-  id            String       @id @default(uuid())
+  id            String        @id @default(uuid())
   name          String
   description   String
-  imageUrl      String?      @map("image_url")
-  imagePublicId String?      @map("image_public_id")
+  imageUrl      String?       @map("image_url")
+  imagePublicId String?       @map("image_public_id")
   products      Products[]
   subcategories SubCategory[]
   menus         Menu[]
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
 
   @@map("categories")
 }
@@ -259,27 +319,27 @@ model SubCategory {
 }
 
 model Products {
-  id              String      @id @default(uuid())
+  id              String            @id @default(uuid())
   name            String
   description     String?
-  category        Category    @relation(fields: [categoryId], references: [id])
-  categoryId      String      @map("category_id")
-  subCategory     SubCategory? @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String?     @map("sub_category_id")
-  station         Stations?    @relation(fields: [stationId], references: [id])
-  stationId       String?     @map("station_id")
+  category        Category          @relation(fields: [categoryId], references: [id])
+  categoryId      String            @map("category_id")
+  subCategory     SubCategory?      @relation(fields: [subCategoryId], references: [id])
+  subCategoryId   String?           @map("sub_category_id")
+  station         Stations?         @relation(fields: [stationId], references: [id])
+  stationId       String?           @map("station_id")
   price           Float
-  imageUrl        String?     @map("image_url")
-  imagePublicId   String?     @map("image_public_id")
+  imageUrl        String?           @map("image_url")
+  imagePublicId   String?           @map("image_public_id")
   popularity      Int?
-  preparationTime Int?        @map("preparation_time")
+  preparationTime Int?              @map("preparation_time")
   variants        ProductVariants[]
   menuItems       MenuItems[]
   orderItems      OrderItems[]
   favorites       Favorites[]
   reviews         Reviews[]
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -288,21 +348,21 @@ model Products {
 }
 
 model Menu {
-  id              String      @id @default(uuid())
+  id              String       @id @default(uuid())
   name            String
   description     String
   price           Float
-  category        Category    @relation(fields: [categoryId], references: [id])
-  categoryId      String      @map("category_id")
-  subcategory     SubCategory @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String      @map("sub_category_id")
-  imageUrl        String      @map("image_url")
-  imagePublicId   String      @map("image_public_id")
-  preparationTime Int?        @map("preparation_time")
+  category        Category     @relation(fields: [categoryId], references: [id])
+  categoryId      String       @map("category_id")
+  subcategory     SubCategory  @relation(fields: [subCategoryId], references: [id])
+  subCategoryId   String       @map("sub_category_id")
+  imageUrl        String       @map("image_url")
+  imagePublicId   String       @map("image_public_id")
+  preparationTime Int?         @map("preparation_time")
   items           MenuItems[]
   orderItems      OrderItems[]
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -375,54 +435,57 @@ model StationSessions {
 // ─── Delivery domain ──────────────────────────────────────────────────────────
 
 model ShippingAddresses {
-  name         String      @id
+  name         String       @id
   region       String
   city         String
   neighborhood String
-  deliveryFee  Float       @map("delivery_fee")
-  deliveryTime Int         @map("delivery_time")
-  branch       Branches    @relation(fields: [branchId], references: [id])
-  branchId     String      @map("branch_id")
+  deliveryFee  Float        @map("delivery_fee")
+  deliveryTime Int          @map("delivery_time")
+  branch       Branches     @relation(fields: [branchId], references: [id])
+  branchId     String       @map("branch_id")
   deliveries   Deliveries[]
   addresses    Address[]
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
 
   @@index([branchId])
   @@map("shipping_addresses")
 }
 
 // ─── Order domain ─────────────────────────────────────────────────────────────
-
 model Orders {
-  orderNumber    String         @id @default(uuid()) @map("order_number")
-  branch         Branches       @relation(fields: [branchId], references: [id])
-  branchId       String         @map("branch_id")
-  cashier        Employees      @relation(fields: [cashierEmail], references: [email])
-  cashierEmail   String         @map("cashier_email")
-  customer       Customers      @relation(fields: [customerPhone], references: [phone])
-  customerPhone  String         @map("customer_phone")
-  custName       String         @map("cust_name") // snapshot of customer name at order time
-  orderStatus    OrderStatus?
-  totalPrice     Float          @map("total_price")
-  items          OrderItems[]
-  deliveries     Deliveries[]
-  pickupOrders   PickupOrders[]
-  dineInOrders   DineInOrders[]
-  orderPayments  OrderPayments[]
-  promotions     PromotionUsage[]
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
+  number        String           @id @default(uuid()) @map("number")
+  branch        Branches         @relation(fields: [branchId], references: [id])
+  branchId      String           @map("branch_id")
+  cashier       Employees?       @relation(name: "CashierOrders", fields: [cashierEmail], references: [email])
+  cashierEmail  String?          @map("cashier_email")
+  customer      Customers        @relation(fields: [customerPhone], references: [phone])
+  customerPhone String           @map("customer_phone")
+  employee      Employees?       @relation(name: "EmployeeOrders", fields: [employeeEmail], references: [email])
+  employeeEmail String?          @map("employee_email")
+  discount      Float            @default(0)
+  subtotal      Float            @map("subtotal")
+  status        OrderStatus?
+  total         Float            @map("total")
+  items         OrderItems[]
+  deliveries    Deliveries[]
+  pickupOrders  PickupOrders[]
+  dineInOrders  DineInOrders[]
+  Payments      Payments[]
+  promotions    PromotionUsage[]
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
   @@index([customerPhone])
   @@index([cashierEmail])
   @@index([branchId])
+  @@index([employeeEmail])
   @@map("orders")
 }
 
 model OrderItems {
   id               String          @id @default(uuid())
-  order            Orders          @relation(fields: [orderNumber], references: [orderNumber])
+  order            Orders          @relation(fields: [orderNumber], references: [number])
   orderNumber      String          @map("order_number")
   product          Products?       @relation(fields: [productId], references: [id])
   productId        String?         @map("product_id")
@@ -440,18 +503,18 @@ model OrderItems {
 }
 
 model Deliveries {
-  id                   String            @id @default(uuid())
-  order                Orders            @relation(fields: [orderNumber], references: [orderNumber])
-  orderNumber          String            @map("order_number")
-  driver               Employees         @relation(fields: [driverEmail], references: [email])
-  driverEmail          String            @map("driver_email")
-  status               DeliveryStatus
-  estimatedDeliveryTime DateTime         @map("estimated_delivery_time")
-  actualDeliveryTime   DateTime?         @map("actual_delivery_time")
-  shippingAddress      ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
-  shippingAddressName  String            @map("shipping_address_name")
-  createdAt            DateTime          @default(now()) @map("created_at")
-  updatedAt            DateTime          @updatedAt @map("updated_at")
+  id                    String            @id @default(uuid())
+  order                 Orders            @relation(fields: [orderNumber], references: [number])
+  orderNumber           String            @map("order_number")
+  driver                Employees         @relation(fields: [driverEmail], references: [email])
+  driverEmail           String            @map("driver_email")
+  status                DeliveryStatus
+  estimatedDeliveryTime DateTime          @map("estimated_delivery_time")
+  actualDeliveryTime    DateTime?         @map("actual_delivery_time")
+  shippingAddress       ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
+  shippingAddressName   String            @map("shipping_address_name")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
 
   @@index([orderNumber])
   @@map("deliveries")
@@ -459,7 +522,7 @@ model Deliveries {
 
 model PickupOrders {
   id          String   @id @default(uuid())
-  order       Orders   @relation(fields: [orderNumber], references: [orderNumber])
+  order       Orders   @relation(fields: [orderNumber], references: [number])
   orderNumber String   @map("order_number")
   pickupTime  DateTime @map("pickup_time")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -471,7 +534,7 @@ model PickupOrders {
 
 model DineInOrders {
   id          String   @id @default(uuid())
-  order       Orders   @relation(fields: [orderNumber], references: [orderNumber])
+  order       Orders   @relation(fields: [orderNumber], references: [number])
   orderNumber String   @map("order_number")
   tableNumber Int      @map("table_number")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -482,56 +545,56 @@ model DineInOrders {
 }
 
 model OrderStatus {
-  id          String   @id @default(uuid())
-  order       Orders   @relation(fields: [orderNumber], references: [orderNumber])
-  orderNumber String   @unique @map("order_number")
+  id          String      @id @default(uuid())
+  order       Orders      @relation(fields: [orderNumber], references: [number])
+  orderNumber String      @unique @map("order_number")
   value       orderstatus
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   @@map("order_statuses")
 }
 
 // ─── Payment domain ───────────────────────────────────────────────────────────
 
-model OrderPayments {
-  id                  String                @id @default(uuid())
-  order               Orders                @relation(fields: [orderNumber], references: [orderNumber])
+model Payments {
+  id                   String                @id @default(uuid())
+  order                Orders                @relation(fields: [orderNumber], references: [number])
   // Removed @unique: an order may have multiple payment attempts
-  orderNumber         String                @map("order_number")
-  amount              Float
-  method              String
-  provider            String                @default("MonetBill")
-  status              String
+  orderNumber          String                @map("order_number")
+  amount               Float
+  method               paymentMethods
+  provider             String                @default("MonetBill")
+  status               String
   monetbillTransaction MonetbillTransaction?
-  createdAt           DateTime              @default(now()) @map("created_at")
-  updatedAt           DateTime              @updatedAt @map("updated_at")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
 
   @@index([orderNumber])
   @@map("order_payments")
 }
 
 model MonetbillTransaction {
-  id                    String        @id @default(uuid())
-  orderPayment          OrderPayments @relation(fields: [orderPaymentId], references: [id])
-  orderPaymentId        String        @unique @map("order_payment_id")
+  id                    String   @id @default(uuid())
+  orderPayment          Payments @relation(fields: [orderPaymentId], references: [id])
+  orderPaymentId        String   @unique @map("order_payment_id")
   reference             String
-  transactionId         String        @map("transaction_id")
-  transactionUuid       String        @map("transaction_uuid")
+  transactionId         String   @map("transaction_id")
+  transactionUuid       String   @map("transaction_uuid")
   amount                Float
   fee                   Float
   currency              String
   provider              String
   status                String
-  customerName          String        @map("customer_name")
-  customerNumber        String        @map("customer_number")
+  customerName          String   @map("customer_name")
+  customerNumber        String   @map("customer_number")
   message               String?
   mccmc                 String?
   operator              String?
-  operatorCode          String?       @map("operator_code")
-  operatorTransactionId String?       @map("operator_transaction_id")
+  operatorCode          String?  @map("operator_code")
+  operatorTransactionId String?  @map("operator_transaction_id")
   sign                  String
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
   @@map("monetbill_transactions")
 }
@@ -539,18 +602,18 @@ model MonetbillTransaction {
 // ─── Reservation domain ───────────────────────────────────────────────────────
 
 model Reservations {
-  id               String            @id @default(uuid())
-  customer         Customers         @relation(fields: [customerPhone], references: [phone])
-  customerPhone    String            @map("customer_phone")
-  reservationDate  DateTime          @map("reservation_date")
-  reservationTime  DateTime          @map("reservation_time")
-  comments         String?
-  branch           Branches          @relation(fields: [branchId], references: [id])
-  branchId         String            @map("branch_id")
-  numberOfPeople   Int               @map("number_of_people")
-  status           ReservationStatus
-  createdAt        DateTime          @default(now()) @map("created_at")
-  updatedAt        DateTime          @updatedAt @map("updated_at")
+  id              String            @id @default(uuid())
+  customer        Customers         @relation(fields: [customerPhone], references: [phone])
+  customerPhone   String            @map("customer_phone")
+  reservationDate DateTime          @map("reservation_date")
+  reservationTime DateTime          @map("reservation_time")
+  comments        String?
+  branch          Branches          @relation(fields: [branchId], references: [id])
+  branchId        String            @map("branch_id")
+  numberOfPeople  Int               @map("number_of_people")
+  status          ReservationStatus
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
 
   @@index([customerPhone])
   @@index([branchId])
@@ -608,7 +671,7 @@ model PromotionUsage {
   id            String    @id @default(uuid())
   promotion     Promotion @relation(fields: [promotionId], references: [id])
   promotionId   String    @map("promotion_id")
-  order         Orders    @relation(fields: [orderNumber], references: [orderNumber])
+  order         Orders    @relation(fields: [orderNumber], references: [number])
   orderNumber   String    @map("order_number")
   customer      Customers @relation(fields: [customerPhone], references: [phone])
   customerPhone String    @map("customer_phone")

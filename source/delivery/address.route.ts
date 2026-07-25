@@ -1,5 +1,5 @@
 import {Router} from "express";
-import {createAddress} from "../controllers/shippingaddresses.controller";
+import {createAddress} from "./shippingaddresses.controller";
 
 const router = Router();
 
