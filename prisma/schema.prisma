@@ -74,9 +74,10 @@ enum CombinationMode {
 enum OrderItemStatus {
   pending
   preparing
+  in_station
+  out_of_station
   ready
-  delivered
-  cancelled
+  complete
 }
 
 enum orderstatus {
@@ -87,6 +88,7 @@ enum orderstatus {
   ready
   ready_for_delivery
   out_for_delivery
+  successful
   delivered
   cancelled
 }
@@ -125,6 +127,19 @@ enum preferenceName {
   favoriteMenu
   notificationPreferences
   marketingOptIn
+}
+
+enum orderType {
+  dineIn
+  takeOut
+  delivery
+  pickup
+}
+
+enum orderItemType {
+  addons
+  menu
+  product
 }
 
 // ─── Customer domain ──────────────────────────────────────────────────────────
@@ -338,6 +353,7 @@ model Products {
   orderItems      OrderItems[]
   favorites       Favorites[]
   reviews         Reviews[]
+  addons          Addons[]
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
@@ -345,6 +361,18 @@ model Products {
   @@index([subCategoryId])
   @@index([stationId])
   @@map("products")
+}
+
+model Addons {
+  id          String     @id @default(uuid())
+  erpcode     String?    @map("ERP Code")
+  name        String
+  description String?
+  price       Float
+  Products    Products[]
+
+  @@index([name])
+  @@map("Addons")
 }
 
 model Menu {
@@ -465,8 +493,9 @@ model Orders {
   employeeEmail String?          @map("employee_email")
   discount      Float            @default(0)
   subtotal      Float            @map("subtotal")
-  status        OrderStatus?
+  status        orderstatus      @default(pending)
   total         Float            @map("total")
+  orderType     orderType        @map("order_type")
   items         OrderItems[]
   deliveries    Deliveries[]
   pickupOrders  PickupOrders[]
@@ -494,6 +523,7 @@ model OrderItems {
   quantity         Int
   price            Float
   status           OrderItemStatus
+  type             orderItemType
   estimatedReadyAt DateTime        @map("estimated_ready_at")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
@@ -536,22 +566,12 @@ model DineInOrders {
   id          String   @id @default(uuid())
   order       Orders   @relation(fields: [orderNumber], references: [number])
   orderNumber String   @map("order_number")
-  tableNumber Int      @map("table_number")
+  table       String   @map("table_number")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([orderNumber])
   @@map("dine_in_orders")
-}
-
-model OrderStatus {
-  id          String      @id @default(uuid())
-  order       Orders      @relation(fields: [orderNumber], references: [number])
-  orderNumber String      @unique @map("order_number")
-  value       orderstatus
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-
-  @@map("order_statuses")
 }
 
 // ─── Payment domain ───────────────────────────────────────────────────────────

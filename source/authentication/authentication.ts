@@ -258,7 +258,7 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
 
 
         const token = crypto.randomBytes(32).toString("hex");
-       const sendToken =  await prisma.token.create({
+        const sendToken =  await prisma.token.create({
             data:{
                 token,
                 employeeEmail: existingEmployee.email,
@@ -321,7 +321,7 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
         }
 
         const token = crypto.randomBytes(32).toString("hex");
-       const sendToken =  await prisma.token.create({
+        const sendToken =  await prisma.token.create({
             data:{
                 token,
                 employeeEmail: existingAdmin.email,
