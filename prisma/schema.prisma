@@ -364,12 +364,13 @@ model Products {
 }
 
 model Addons {
-  id          String     @id @default(uuid())
-  erpcode     String?    @map("ERP Code")
+  id          String       @id @default(uuid())
+  erpcode     String?      @map("ERP Code")
   name        String
   description String?
   price       Float
   Products    Products[]
+  orderItems  OrderItems[]
 
   @@index([name])
   @@map("Addons")
@@ -520,6 +521,8 @@ model OrderItems {
   productId        String?         @map("product_id")
   menu             Menu?           @relation(fields: [menuId], references: [id])
   menuId           String?         @map("menu_id")
+  addons           Addons?         @relation(fields: [addonId], references: [id])
+  addonId          String?         @map("addon_id")
   quantity         Int
   price            Float
   status           OrderItemStatus
@@ -539,7 +542,7 @@ model Deliveries {
   driver                Employees         @relation(fields: [driverEmail], references: [email])
   driverEmail           String            @map("driver_email")
   status                DeliveryStatus
-  estimatedDeliveryTime DateTime          @map("estimated_delivery_time")
+  estimatedDeliveryTime DateTime?         @map("estimated_delivery_time")
   actualDeliveryTime    DateTime?         @map("actual_delivery_time")
   shippingAddress       ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
   shippingAddressName   String            @map("shipping_address_name")
