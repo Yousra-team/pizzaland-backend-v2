@@ -398,15 +398,15 @@ model Menu {
   @@map("menus")
 }
 
-// Relation field is optional: set productId to String? if you need unlinked variants
 model ProductVariants {
-  id        String   @id @default(uuid())
-  name      String
-  price     Float
-  product   Products @relation(fields: [productId], references: [id])
-  productId String   @map("product_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id         String       @id @default(uuid())
+  name       String
+  price      Float
+  product    Products     @relation(fields: [productId], references: [id])
+  productId  String       @map("product_id")
+  orderItems OrderItems[]
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
 
   @@index([productId])
   @@map("product_variants")
@@ -514,24 +514,28 @@ model Orders {
 }
 
 model OrderItems {
-  id               String          @id @default(uuid())
-  order            Orders          @relation(fields: [orderNumber], references: [number])
-  orderNumber      String          @map("order_number")
-  product          Products?       @relation(fields: [productId], references: [id])
-  productId        String?         @map("product_id")
-  menu             Menu?           @relation(fields: [menuId], references: [id])
-  menuId           String?         @map("menu_id")
-  addons           Addons?         @relation(fields: [addonId], references: [id])
-  addonId          String?         @map("addon_id")
+  id               String           @id @default(uuid())
+  order            Orders           @relation(fields: [orderNumber], references: [number])
+  orderNumber      String           @map("order_number")
+  product          Products?        @relation(fields: [productId], references: [id])
+  productId        String?          @map("product_id")
+  productVariant   ProductVariants? @relation(fields: [productVariantId], references: [id])
+  productVariantId String?          @map("product_variant_id")
+  menu             Menu?            @relation(fields: [menuId], references: [id])
+  menuId           String?          @map("menu_id")
+  addons           Addons?          @relation(fields: [addonId], references: [id])
+  addonId          String?          @map("addon_id")
   quantity         Int
   price            Float
   status           OrderItemStatus
   type             orderItemType
-  estimatedReadyAt DateTime        @map("estimated_ready_at")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
+  estimatedReadyAt DateTime         @map("estimated_ready_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   @@index([orderNumber])
+  @@index([productId])
+  @@index([productVariantId])
   @@map("order_items")
 }
 
