@@ -1,7 +1,12 @@
-import { ProductSchema, AddonSchema ,ProductVariantSchema } from './product.schema';
+import { ProductSchema, AddonSchema , ProductVariantSchema , CategorySchema , SubCategorySchema , ManyProductSchema , MenuSchema } from './product.schema';
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
+
+
+// CREATE ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES
+
+//CREATE PRODUCT ENDPOINT
 
 export const createProduct = async (req: Request, res: Response) => {
     const result = ProductSchema.safeParse(req.body);
@@ -17,8 +22,6 @@ export const createProduct = async (req: Request, res: Response) => {
 
     let existingAddonIds: string[] = [];
     let newAddonsData: AddonInput[] = [];
-
-
 
     if (req.body.addons) {
         const addonsResult = z.array(AddonSchema).safeParse(req.body.addons);
@@ -63,6 +66,254 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 };
 
+// CREATE MULTIPLE PRODUCTS AT ONCE
+export const createManyProducts = async (req: Request, res: Response) => {
+    const result = ManyProductSchema.safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid product data', details: result.error } });
+    }
+
+    const productData = result.data;
+
+    try {
+        const createdProducts = await prisma.$transaction(async (tx) => {
+            const created = [];
+
+            for (const product of productData) {
+                type AddonInput = z.infer<typeof AddonSchema>;
+
+                const existingAddonIds: string[] = product.addons
+                    ?.filter((addon) => addon.id)
+                    .map((addon) => addon.id as string) || [];
+
+                const newAddonsData: AddonInput[] = product.addons
+                    ?.filter((addon) => !addon.id) || [];
+
+                const createdProduct = await tx.products.create({
+                    data: {
+                        ...product,
+                        addons: {
+                            connect: existingAddonIds.map((id) => ({ id })),
+                            create: newAddonsData,
+                        },
+                        variants: {
+                            create: product.variants || [],
+                        },
+                    },
+                    include: { addons: true, variants: true },
+                });
+
+                created.push(createdProduct);
+            }
+
+            return created;
+        });
+
+        res.status(201).json({ data: createdProducts, meta: null });
+    } catch (error) {
+        console.error("Error creating products:", error);
+        res.status(500).json({ error: { message: "Failed to create products" } });
+    }
+};
+
+// MENU SECTION : Create Menu
+export const makeMenu = async (req: Request, res: Response) => {
+    const result = MenuSchema.safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid menu data', details: result.error } });
+    }
+
+    const { MenuItems, ...menuData } = result.data;
+
+    try {
+        const newMenu = await prisma.menu.create({
+            data: {
+                ...menuData,
+                items: {
+                    create: MenuItems.map(({ productId, quantity }) => ({
+                        quantity,
+                        product: { connect: { id: productId } },
+                    })),
+                },
+            },
+            include: { items: true },
+        });
+
+        res.status(201).json({ data: newMenu, meta: null });
+    } catch (error) {
+        console.error("Error creating menu:", error);
+        res.status(500).json({ error: { message: "Failed to create menu" } });
+    }
+};
+
+// MENU SECTION : Create Many Menus at once
+export const makeManyMenus = async (req: Request, res: Response) => {
+    const result = z.array(MenuSchema).safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid menu data', details: result.error } });
+    }
+
+    const menuData = result.data;
+
+    try {
+        const newMenus = await prisma.$transaction(async (tx) => {
+            const created = [];
+
+            for (const menu of menuData) {
+                const { MenuItems, ...rest } = menu;
+
+                const newMenu = await tx.menu.create({
+                    data: {
+                        ...rest,
+                        items: {
+                            create: MenuItems.map(({ productId, quantity }) => ({
+                                quantity,
+                                product: { connect: { id: productId } },
+                            })),
+                        },
+                    },
+                    include: { items: true },
+                });
+
+                created.push(newMenu);
+            }
+
+            return created;
+        });
+
+        res.status(201).json({ data: newMenus, meta: null });
+    } catch (error) {
+        console.error("Error creating menus:", error);
+        res.status(500).json({ error: { message: "Failed to create menus" } });
+    }
+};
+// ADDON SECTION : Create  Addons
+
+export const createAddon = async (req: Request, res: Response) => {
+    const result = AddonSchema.safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid addon data', details: result.error } });
+    }
+
+    try {
+        const newAddon = await prisma.addons.create({
+            data: result.data,
+        });
+        res.status(201).json({ data: newAddon, meta: null });
+    }
+    catch (error) {
+        console.error("Error creating addon:", error);
+        res.status(500).json({ error: { message: "Failed to create addon" } });
+    }       
+};
+
+// CREATE MANY ADDONS AT ONCE
+export const createManyAddons = async (req: Request, res: Response) => {
+    const result = z.array(AddonSchema).safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid addon data', details: result.error } });
+    }
+
+    try {
+        const newAddons = await prisma.addons.createMany({
+            data: result.data,
+        });
+        res.status(201).json({ data: newAddons, meta: null });
+    } catch (error) {
+        console.error("Error creating addons:", error);
+        res.status(500).json({ error: { message: "Failed to create addons" } });
+    }
+};
+
+// Category Section :CREATE Categories
+
+export const createCategory = async (req: Request, res: Response) => { 
+    // Data validation using Zod SafeParsing
+     const result = CategorySchema.safeParse(req.body);
+     
+     if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid product data', details: result.error } });
+    }
+
+    try {
+        const newCategory = await prisma.category.create({
+            data: result.data,
+        });
+        res.status(201).json({ data: newCategory, meta: null });
+    } catch(error) {
+      console.error("Error Creating a Category");
+      res.status(500).json({error: {message: "Failed to create category"}})
+
+    }
+};
+
+// CREATE MANY CATEGORIES AT ONCE
+export const createManyCategories = async (req: Request, res: Response) => {
+    const result = z.array(CategorySchema).safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid category data', details: result.error } });
+    }
+
+    try {
+        const newCategories = await prisma.category.createMany({
+            data: result.data,
+        });
+        res.status(201).json({ data: newCategories, meta: null });
+    } catch (error) {
+        console.error("Error creating categories:", error);
+        res.status(500).json({ error: { message: "Failed to create categories" } });
+    }
+};
+
+
+export const createSubCategory = async (req: Request, res: Response) => { 
+    // Data validation using Zod SafeParsing
+     const result = SubCategorySchema.safeParse(req.body);
+     
+     if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
+    }
+
+    try {
+        const newSubCategory = await prisma.subCategory.create({
+            data: result.data,
+        });
+        res.status(201).json({ data: newSubCategory, meta: null });
+    } catch(error) {
+      console.error("Error Creating a SubCategory");
+      res.status(500).json({error: {message: "Failed to create subcategory"}})
+
+    }
+};
+
+// Create Many SubCategories at once
+export const createManySubCategories = async (req: Request, res: Response) => {
+    const result = z.array(SubCategorySchema).safeParse(req.body);
+
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
+    }
+
+    try {
+        const newSubCategories = await prisma.subCategory.createMany({
+            data: result.data,
+        });
+        res.status(201).json({ data: newSubCategories, meta: null });
+    } catch (error) {
+        console.error("Error creating subcategories:", error);
+        res.status(500).json({ error: { message: "Failed to create subcategories" } });
+    }   
+};
+
+// GET ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES
+
+
 // Function to Fetch All Products
 export const getAllProducts = async (req: Request, res: Response) =>  {
       
@@ -99,11 +350,100 @@ export const getProductById = async (req: Request, res: Response) => {
     }
 };
 
+// Get categories
+
+export const getCategories = async (req: Request, res: Response) => {
+    try {
+        const categories = await prisma.category.findMany({
+            include : {products: true , subcategories: true}
+        });
+        res.status(200).json({ data: categories, meta: null });
+    } catch (error) {
+        console.error("Error fetching categories:", error);
+        res.status(500).json({ error: { message: "Failed to fetch categories" } });
+    }
+};
+
+// Get category by Id
+export const getCategoryById = async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+   try {
+        const category = await prisma.category.findUnique({
+            where: {id},
+            include: {products: true , subcategories : true}
+        })
+        res.status(200).json({data: category , meta: "Product Categories"})
+
+   } catch(error){
+       console.error("Error fetching category:", error);
+        res.status(500).json({ error: { message: "Failed to fetch category" } });
+}
+};
+// Get subcategories
+
+export const getSubCategories = async (req: Request, res: Response) => {
+    try {
+        const subcategories = await prisma.subCategory.findMany();
+        res.status(200).json({ data: subcategories, meta: null });
+    } catch (error) {
+        console.error("Error fetching subcategories:", error);
+        res.status(500).json({ error: { message: "Failed to fetch subcategories" } });
+    }
+};
+
+export const getSubCategoryById = async (req: Request , res: Response) => {
+    const id = req.params.id as string
+   try {
+        const subcategory = await prisma.subCategory.findUnique({
+            where: {id},
+            include: {products : true } // I want to see if I can include addons and variants from here
+        })
+        res.status(200).json({ data: subcategory , meta: null })
+    } catch (error) {
+        console.error("Error fetching subcategories:", error);
+        res.status(500).json({ error: { message: "Failed to fetch subcategories" } });
+    }
+};
+// Get addons
+
+export const getAddons = async (req: Request, res: Response) => {
+    try {
+        const addons = await prisma.addons.findMany();
+        res.status(200).json({ data: addons, meta: null });
+    }
+    catch (error) {
+        console.error("Error fetching addons:", error);
+        res.status(500).json({ error: { message: "Failed to fetch addons" } });
+    }
+};
+
+//Get addon By Id 
+
+export const getAddonById = async (req: Request, res: Response) => {
+    const id = req.params.id as string
+    try {
+        const addons = await prisma.addons.findUnique({
+            where: {id},
+        });
+        res.status(200).json({ data: addons, meta: null });
+    }
+    catch (error) {
+        console.error("Error fetching addons:", error);
+        res.status(500).json({ error: { message: "Failed to fetch addons" } });
+    }
+};
+
+// UPDATE ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES
+
 // Update Product by ID
 export const updateProductById = async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const result = ProductSchema.partial().safeParse(req.body);
+    const UpdatableProductFields = ProductSchema.omit({
+    categoryId: true,
+    subCategoryId: true,
+   }).partial();
 
+      const result = UpdatableProductFields.safeParse(req.body);
     if (!result.success) {
         return res.status(400).json({ error: { message: 'Invalid product data', details: result.error } });
     }
@@ -121,3 +461,75 @@ export const updateProductById = async (req: Request, res: Response) => {
         res.status(500).json({ error: { message: "Failed to update product" } });
     }
 };
+
+// Update Category by ID
+export const updateCategoryById = async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const UpdatableCategoryFields = CategorySchema.partial();
+
+    const result = UpdatableCategoryFields.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid category data', details: result.error } });
+    }
+
+    try {
+        const updatedCategory = await prisma.category.update({
+            where: { id },
+            data: result.data
+        });
+
+        res.status(200).json({ data: updatedCategory, meta: null });
+    } catch (error) {
+        console.error("Error updating category:", error);
+        res.status(500).json({ error: { message: "Failed to update category" } });
+    }
+};
+
+// Update Subcategory by ID
+export const updateSubcategoryById = async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const UpdatableSubcategoryFields = SubCategorySchema.omit({}).partial();
+
+    const result = UpdatableSubcategoryFields.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
+    }
+
+    try {
+        const updatedSubcategory = await prisma.subCategory.update({
+            where: { id },
+            data: result.data
+        });
+
+        res.status(200).json({ data: updatedSubcategory, meta: null });
+    } catch (error) {
+        console.error("Error updating subcategory:", error);
+        res.status(500).json({ error: { message: "Failed to update subcategory" } });
+    }
+};
+
+
+// Update Addons by ID
+export const updateAddonsById = async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const UpdatableAddonsFields = AddonSchema.omit({}).partial();
+
+    const result = UpdatableAddonsFields.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
+    }
+
+    try {
+        const updatedAddons = await prisma.subCategory.update({
+            where: { id },
+            data: result.data
+        });
+
+        res.status(200).json({ data: updatedAddons, meta: null });
+    } catch (error) {
+        console.error("Error updating Addons:", error);
+        res.status(500).json({ error: { message: "Failed to update Addon" } });
+    }
+};
+
+// Add a property of Hidden to Products , Categories , Items , Addons etc
