@@ -84,42 +84,60 @@ export const getReviewsByProductId = async (req: Request, res: Response): Promis
     }
 };
 
+// Get all reviews by a specific customer
+export const getReviewsByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
+    const customerPhone = req.user?.userId
+    try {
+         if(!customerPhone) {
+            res.status(403).json({message: "Login First Bitch!"})
+         };
+
+         const reviews = prisma.reviews.findMany({
+            where: {customerPhone}
+         });
+         res.status(200).json(reviews)
+
+    }catch(error){
+       res.status(500).json({ error: 'Failed to fetch reviews' }); 
+    };
+};
+
+
 // Get all favorites for a specific customer
 export const getFavoritesByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone: string [] = req.body.customerPhone;
-    const created : object[] = [];
-
+    const customerPhone = req.user?.userId
     try {
-        for (const phone of customerPhone) {
-            const favorites = await prisma.favorites.findMany({
-                where: { customerPhone: phone },
-                include: { customer: true }
-            });
-            created.push(favorites);
-        }
-        res.status(200).json(created);
+          if (!customerPhone) {
+        res.status(403).json({message: "Login First Bitch!"})
+     };
+
+     const favorites = await prisma.favorites.findMany({
+        where: {customerPhone},
+        include: {product: true}
+     });
+
+     res.status(200).json(favorites)
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch favorites' });
     }
 };
 
 // Get all user preferences for a specific customer
-export const getUserPreferencesByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone: string [] = req.body.customerPhone;
-    const created : object[] = [];
-
+export const getUserPreferences = async (req: Request, res: Response): Promise<void> => {
     try {
-        for (const phone of customerPhone) {
-            const userPreferences = await prisma.userPreferences.findMany({
-                where: { customerPhone: phone },
-                include: { customer: true }
-            });
-            created.push(userPreferences);
-        }
-        res.status(200).json(created);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch user preferences' });
-    }
-};
+     const customerPhone = req.user?.userId;
 
+     if (!customerPhone) {
+        res.status(403).json({message: "Login First Bitch!"})
+     };
+
+     const userPreferences = await prisma.userPreferences.findMany({
+        where: {customerPhone}
+     });
+
+     res.status(200).json(userPreferences)
+    } catch(error) {
+        res.status(500).json
+    };
+};
 // Remember to JWT authmiddleware for all the above routes to ensure that only authenticated users can access them.

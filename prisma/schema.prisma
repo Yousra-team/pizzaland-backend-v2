@@ -711,3 +711,18 @@ model PromotionUsage {
   @@index([customerPhone])
   @@map("promotion_usages")
 }
+
+model Table {
+  id      String           @id @default(uuid())
+  number  String           @map("Number")
+  floor   Floor            @relation(fields: [floorId] , references: [id])
+  floorId String           @map("Floor ID")
+  capacity Int             
+}
+
+model Floor {
+  id    String       @id @default(uuid())
+  name  String       @map("Name")
+
+  tables Table[]
+}

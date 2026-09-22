@@ -1,12 +1,11 @@
-import jwt from "jsonwebtoken";
+
 import { Request, Response, NextFunction } from "express";
+import { verifyAccessToken } from "../authentication/jwt.util";
 
 const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
-    const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
     
-
     if (!authHeader) {
       return res.status(401).json({ message: "No token provided" });
     }
@@ -17,7 +16,7 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
       return res.status(401).json({ message: "Malformed token" });
     }
 
-    const decoded = jwt.verify(token, ACCESS_SECRET) ;
+    const decoded = verifyAccessToken(token) ;
 
     req.user = decoded;
 
