@@ -543,8 +543,8 @@ model Deliveries {
   id                    String            @id @default(uuid())
   order                 Orders            @relation(fields: [orderNumber], references: [number])
   orderNumber           String            @map("order_number")
-  driver                Employees         @relation(fields: [driverEmail], references: [email])
-  driverEmail           String            @map("driver_email")
+  driver                Employees?        @relation(fields: [driverEmail], references: [email])
+  driverEmail           String?           @map("driver_email")
   status                DeliveryStatus
   estimatedDeliveryTime DateTime?         @map("estimated_delivery_time")
   actualDeliveryTime    DateTime?         @map("actual_delivery_time")
@@ -713,16 +713,16 @@ model PromotionUsage {
 }
 
 model Table {
-  id      String           @id @default(uuid())
-  number  String           @map("Number")
-  floor   Floor            @relation(fields: [floorId] , references: [id])
-  floorId String           @map("Floor ID")
-  capacity Int             
+  id       String @id @default(uuid())
+  number   String @map("Number")
+  floor    Floor  @relation(fields: [floorId], references: [id])
+  floorId  String @map("Floor ID")
+  capacity Int
 }
 
 model Floor {
-  id    String       @id @default(uuid())
-  name  String       @map("Name")
+  id   String @id @default(uuid())
+  name String @map("Name")
 
   tables Table[]
 }
