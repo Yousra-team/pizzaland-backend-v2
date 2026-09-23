@@ -22,7 +22,8 @@
     "prisma:push": "doppler run -- npx prisma db push",
     "studio": "doppler run -- npx prisma studio",
     "build": "tsc",
-    "start": "doppler run -- node dist/server.js"
+    "start": "doppler run -- node dist/server.js",
+    "migrate":"doppler run -- npx prisma migrate dev"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",

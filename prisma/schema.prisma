@@ -287,7 +287,7 @@ model Branches {
   city              String
   neighborhood      String
   manager           Employees?          @relation("BranchManager", fields: [managerEmail], references: [email])
-  managerEmail      String?             @unique @map("manager_email")
+  managerEmail      String?             @unique @map("Manager Email")
   employees         Employees[]         @relation("BranchEmployees")
   shippingAddresses ShippingAddresses[]
   stations          Stations[]
@@ -306,8 +306,8 @@ model Category {
   id            String        @id @default(uuid())
   name          String
   description   String
-  imageUrl      String?       @map("image_url")
-  imagePublicId String?       @map("image_public_id")
+  imageUrl      String?       @map("Image URL")
+  imagePath     String?       @map("Image Path")
   products      Products[]
   subcategories SubCategory[]
   menus         Menu[]
@@ -321,14 +321,14 @@ model SubCategory {
   id            String     @id @default(uuid())
   name          String
   description   String
-  imageUrl      String?    @map("image_url")
-  imagePublicId String?    @map("image_public_id")
-  categoryId    String     @map("category_id")
+  imageUrl      String?    @map("Image URL")
+  imagePath     String?    @map("Image PATH")
+  categoryId    String     @map("CATEGORY ID")
   category      Category   @relation(fields: [categoryId], references: [id])
   products      Products[]
   menus         Menu[]
-  createdAt     DateTime   @default(now()) @map("created_at")
-  updatedAt     DateTime   @updatedAt @map("updated_at")
+  createdAt     DateTime   @default(now()) @map("CREATED AT")
+  updatedAt     DateTime   @updatedAt @map("UPDATED AT")
 
   @@map("sub_categories")
 }
@@ -344,8 +344,8 @@ model Products {
   station         Stations?         @relation(fields: [stationId], references: [id])
   stationId       String?           @map("station_id")
   price           Float
-  imageUrl        String?           @map("image_url")
-  imagePublicId   String?           @map("image_public_id")
+  imageUrl        String?           @map("Image URL")
+  imagePath       String?           @map("Image Path")
   popularity      Int?
   preparationTime Int?              @map("preparation_time")
   variants        ProductVariants[]
@@ -365,9 +365,10 @@ model Products {
 
 model Addons {
   id          String       @id @default(uuid())
-  erpcode     String?      @map("ERP Code")
   name        String
   description String?
+  imageUrl    String?      @map("Image URL")
+  imagePath   String?      @map("Image Path")
   price       Float
   Products    Products[]
   orderItems  OrderItems[]
@@ -515,7 +516,7 @@ model Orders {
 
 model OrderItems {
   id               String           @id @default(uuid())
-  order            Orders           @relation(fields: [orderNumber], references: [number])
+  order            Orders           @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber      String           @map("order_number")
   product          Products?        @relation(fields: [productId], references: [id])
   productId        String?          @map("product_id")
@@ -541,7 +542,7 @@ model OrderItems {
 
 model Deliveries {
   id                    String            @id @default(uuid())
-  order                 Orders            @relation(fields: [orderNumber], references: [number])
+  order                 Orders            @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber           String            @map("order_number")
   driver                Employees?        @relation(fields: [driverEmail], references: [email])
   driverEmail           String?           @map("driver_email")
@@ -559,7 +560,7 @@ model Deliveries {
 
 model PickupOrders {
   id          String   @id @default(uuid())
-  order       Orders   @relation(fields: [orderNumber], references: [number])
+  order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   pickupTime  DateTime @map("pickup_time")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -571,7 +572,7 @@ model PickupOrders {
 
 model DineInOrders {
   id          String   @id @default(uuid())
-  order       Orders   @relation(fields: [orderNumber], references: [number])
+  order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   table       String   @map("table_number")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -585,7 +586,7 @@ model DineInOrders {
 
 model Payments {
   id                   String                @id @default(uuid())
-  order                Orders                @relation(fields: [orderNumber], references: [number])
+  order                Orders                @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   // Removed @unique: an order may have multiple payment attempts
   orderNumber          String                @map("order_number")
   amount               Float
@@ -602,7 +603,7 @@ model Payments {
 
 model MonetbillTransaction {
   id                    String   @id @default(uuid())
-  orderPayment          Payments @relation(fields: [orderPaymentId], references: [id])
+  orderPayment          Payments @relation(fields: [orderPaymentId], references: [id], onDelete: Cascade)
   orderPaymentId        String   @unique @map("order_payment_id")
   reference             String
   transactionId         String   @map("transaction_id")
@@ -698,7 +699,7 @@ model PromotionUsage {
   id            String    @id @default(uuid())
   promotion     Promotion @relation(fields: [promotionId], references: [id])
   promotionId   String    @map("promotion_id")
-  order         Orders    @relation(fields: [orderNumber], references: [number])
+  order         Orders    @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber   String    @map("order_number")
   customer      Customers @relation(fields: [customerPhone], references: [phone])
   customerPhone String    @map("customer_phone")
