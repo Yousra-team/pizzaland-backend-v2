@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "target": "ES2023",
     "strict": true,
     "esModuleInterop": true,
@@ -9,29 +9,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
-    "outDir": "./dist",
-
-  },
-  "include": ["source/**/*" ,"prisma.config.ts" ],
-  "exclude": ["node_modules", "dist" ,"mocks"]
-}
-
-//{
- /* "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-
     "rootDir": "./source",
-    "outDir": "./dist",
-
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-
-    "forceConsistentCasingInFileNames": true
-  },*/
-  //"include": ["source/**/*" ],
- // "exclude": ["node_modules", "dist"]
-//}
-
+    "outDir": "./dist"
+  },
+  "include": ["source/**/*"],
+  "exclude": ["node_modules", "dist", "mocks"]
+}
