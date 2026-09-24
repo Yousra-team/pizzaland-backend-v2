@@ -2,9 +2,9 @@ import { Router } from "express";
 import {
     createOrder, getOrdersByBranch, getMyOrders, updateOrder, deleteOrders,
     dispatchOrder, updateOrderItemStatus,
-} from "./order.service";
-import authMiddleware from "../middlewares/auth.middleware";
-import roleMiddleware from "../middlewares/role.middleware";
+} from "./order.service.js";
+import authMiddleware from "../middlewares/auth.middleware.js";
+import roleMiddleware from "../middlewares/role.middleware.js";
 
 
 const router = Router();

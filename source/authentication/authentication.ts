@@ -1,10 +1,10 @@
-import {prisma} from "../lib/prisma";
+import {prisma} from "../lib/prisma.js";
 import {Request, Response} from "express";
 import * as z from "zod";
-//import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications"
+//import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications.js"
 import * as crypto from "node:crypto";
-import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util";
-import {comparePassword, hashPassword} from "./bcrypt.util";
+import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
+import {comparePassword, hashPassword} from "./bcrypt.util.js";
 
 
 const CustomerSchema = z.object({

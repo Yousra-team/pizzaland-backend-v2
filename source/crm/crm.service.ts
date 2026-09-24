@@ -1,7 +1,7 @@
-import { reviewSchema , favoriteSchema , userPreferenceSchema } from "./crm.schema";
+import { reviewSchema , favoriteSchema , userPreferenceSchema } from "./crm.schema.js";
 import * as z from "zod";
 import { Request, Response } from "express";
-import { prisma } from '../lib/prisma';
+import { prisma } from '../lib/prisma.js';
 
 // All handlers below run after authMiddleware, so req.user is set.
 // For customers, req.user.userId is their phone number (see authentication.ts).

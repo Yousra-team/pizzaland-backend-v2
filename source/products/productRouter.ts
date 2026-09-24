@@ -5,8 +5,8 @@ import {
     getAllProducts, getProductById, getCategories, getCategoryById, getSubCategories, getSubCategoryById,
     getAddons, getAddonById,
     updateProductById, updateCategoryById, updateSubcategoryById, updateAddonsById,
-} from "./product.service";
-import { upload } from "../middlewares/upload.image";
+} from "./product.service.js";
+import { upload } from "../middlewares/upload.image.js";
 
 
 const router = Router();

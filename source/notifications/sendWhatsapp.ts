@@ -1,4 +1,4 @@
-import { client } from "./twilioClient";
+import { client } from "./twilioClient.js";
 
 async function sendWhatsapp(to: string, contentSid: string, variables: object) {
     const message = await client.messages.create({

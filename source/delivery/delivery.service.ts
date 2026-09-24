@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import * as z from "zod";
-import { prisma } from "../lib/prisma";
-import { driverDeliveryInclude, deliveryStatusSchema } from "./delivery.schema";
+import { prisma } from "../lib/prisma.js";
+import { driverDeliveryInclude, deliveryStatusSchema } from "./delivery.schema.js";
 
 // All handlers run after authMiddleware + roleMiddleware("DELIVERY_DRIVER"),
 // so req.user.userId is the driver's email.

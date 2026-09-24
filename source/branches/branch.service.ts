@@ -1,7 +1,7 @@
 
-import {prisma} from "../lib/prisma";
+import {prisma} from "../lib/prisma.js";
 import {Request, Response} from "express";
-import { branchSchema , shippingAddressSchema } from "./branch.schema";
+import { branchSchema , shippingAddressSchema } from "./branch.schema.js";
 import z from "zod";
 
 // Maps known Prisma errors to HTTP responses; returns true if it handled the error

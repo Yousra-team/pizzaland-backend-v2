@@ -2,9 +2,9 @@ import { Router } from "express";
 import {
     addFavorite, addReview, addUserPreference,
     getReviewsByProductId, getReviewsByCustomerPhone, getFavoritesByCustomerPhone, getUserPreferences,
-} from "./crm.service";
-import authMiddleware from "../middlewares/auth.middleware";
-import roleMiddleware from "../middlewares/role.middleware";
+} from "./crm.service.js";
+import authMiddleware from "../middlewares/auth.middleware.js";
+import roleMiddleware from "../middlewares/role.middleware.js";
 
 
 const router = Router();

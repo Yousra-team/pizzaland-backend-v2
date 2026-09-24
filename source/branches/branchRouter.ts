@@ -4,7 +4,7 @@ import {
     getBranches, getAbranchById, getAshippingAddress, getManyShippingAddresses,
     updateBranches, updateShippingAddresses,
     deleteBranch, deleteManyBranches, deleteShippingAddress, deleteManyShippingAddresses,
-} from "./branch.service";
+} from "./branch.service.js";
 
 
 const router = Router();

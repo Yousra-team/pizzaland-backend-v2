@@ -10,7 +10,7 @@ import {
     verifyToken,
     refreshAccessToken,
     logout,
-} from "./authentication"; // adjust path to wherever this file actually lives
+} from "./authentication.js"; // adjust path to wherever this file actually lives
 
 const router = Router();
 

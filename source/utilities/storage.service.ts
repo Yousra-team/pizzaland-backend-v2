@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { supabase } from "../configurations/supabase";
+import { supabase } from "../configurations/supabase.js";
 
 const BUCKET = "pizzaland-products-images";
 

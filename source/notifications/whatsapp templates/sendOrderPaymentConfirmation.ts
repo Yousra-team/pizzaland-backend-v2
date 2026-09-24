@@ -1,4 +1,4 @@
-import {sendWhatsapp} from "../sendWhatsapp";
+import {sendWhatsapp} from "../sendWhatsapp.js";
 
 
 const CONTENT_SID = "HX36d3c8463fcba28279ce63900f27d92f";

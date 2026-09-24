@@ -1,7 +1,7 @@
 import {Router} from "express";
-import { getAvailableDeliveries, claimDelivery, getMyDeliveries, updateDeliveryStatus } from "./delivery.service";
-import authMiddleware from "../middlewares/auth.middleware";
-import roleMiddleware from "../middlewares/role.middleware";
+import { getAvailableDeliveries, claimDelivery, getMyDeliveries, updateDeliveryStatus } from "./delivery.service.js";
+import authMiddleware from "../middlewares/auth.middleware.js";
+import roleMiddleware from "../middlewares/role.middleware.js";
 
 const router = Router();
 

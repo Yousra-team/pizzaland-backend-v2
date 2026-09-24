@@ -1,8 +1,8 @@
-import { ProductSchema, AddonSchema , ProductVariantSchema , CategorySchema , SubCategorySchema , ManyProductSchema , MenuSchema } from './product.schema';
+import { ProductSchema, AddonSchema , ProductVariantSchema , CategorySchema , SubCategorySchema , ManyProductSchema , MenuSchema } from './product.schema.js';
 import { Request, Response } from 'express';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../lib/prisma.js';
 import { z } from 'zod';
-import { uploadImage, deleteImage } from '../utilities/storage.service';
+import { uploadImage, deleteImage } from '../utilities/storage.service.js';
 
 
 // CREATE ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES

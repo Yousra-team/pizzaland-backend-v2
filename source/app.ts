@@ -1,12 +1,12 @@
 import express from 'express';
 import cookieParser from "cookie-parser";
-import productRoutes from './products/productRouter';
-import branchRoutes from './branches/branchRouter';
-import deliveryRoutes from './delivery/deliveryRouter';
-import authRouter from './authentication/authenticationRouter'
-import crmRoutes from './crm/crmRouter';
-import orderRoutes from './orders/ordersRouter';
-import errorMiddleware from './middlewares/error.middleware';
+import productRoutes from './products/productRouter.js';
+import branchRoutes from './branches/branchRouter.js';
+import deliveryRoutes from './delivery/deliveryRouter.js';
+import authRouter from './authentication/authenticationRouter.js'
+import crmRoutes from './crm/crmRouter.js';
+import orderRoutes from './orders/ordersRouter.js';
+import errorMiddleware from './middlewares/error.middleware.js';
 
 const app = express();
 

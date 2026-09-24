@@ -1,8 +1,8 @@
 
-import { prisma } from "../lib/prisma";
+import { prisma } from "../lib/prisma.js";
 import { Request, Response } from "express";
-import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema";
-import { fullOrderInclude } from "./order.include";
+import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
+import { fullOrderInclude } from "./order.include.js";
 
 // An error we throw on purpose (bad input, wrong order state), carrying the HTTP status
 // and code to answer with. Anything else that fails is a real 500.

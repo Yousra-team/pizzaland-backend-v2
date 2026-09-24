@@ -1,6 +1,6 @@
-import { accountMovementSchema } from "./crm.schema";
-import { prisma } from '../lib/prisma';
-import { Prisma } from "../generated/prisma/client";
+import { accountMovementSchema } from "./crm.schema.js";
+import { prisma } from '../lib/prisma.js';
+import { Prisma } from "../generated/prisma/client.js";
 
 // These helpers are called from other services (orders, payments), not directly by routes.
 // They throw on failure; the calling controller turns the error into an HTTP response.
