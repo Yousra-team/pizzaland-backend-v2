@@ -1,0 +1,2657 @@
+{
+  "info": {
+    "name": "Pizzaland API v2",
+    "description": "# Pizzaland API v2 — Integration Guide\n\nInternal API documentation for the Pizzaland V2 backend (Yousra Company). Generated from the `pizzaland-backend-v2` repository (commit `72a5432`, 24 Sep 2026). Use it only if you are an employee, stakeholder or partner of Yousra Company.\n\n## 1. Base URL & variables\n\nAll requests use `{{baseUrl}}` (collection variable). Default: `http://localhost:3000`. Switch it to `{{prodBaseUrl}}` (`https://backend.pizzaland.cm`) once this build is deployed.\n\nEvery route is under `/api/v2`. **Watch out:** the catalog router is mounted at `/api/v2/products`, so catalog paths are double-prefixed: `/api/v2/products/products`, `/api/v2/products/categories`, `/api/v2/products/addons`, etc.\n\n| Module | Prefix |\n|---|---|\n| Authentication | `/api/v2/auth` |\n| Catalog (products, categories, subcategories, addons, menus) | `/api/v2/products` |\n| Branches & shipping addresses | `/api/v2/branches` |\n| CRM (favorites, reviews, preferences) | `/api/v2/crm` |\n| Deliveries (driver app) | `/api/v2/deliveries` |\n| Orders (POS, KDS, customer tracking) | `/api/v2/orders` |\n\n## 2. Authentication flow\n\nPasswordless for customers, password + code for employees:\n\n1. **Register** — `POST /auth/customers/register` (customers) or `POST /auth/employees/register` (staff).\n2. **Login** — `POST /auth/customers/login` (phone) / `/auth/employees/login` / `/auth/admins/login` (email + password). The server creates a one-time verification token valid **5 minutes**.\n   - ⚠️ Dev mode: WhatsApp/email delivery is commented out, so the token is returned in the response as `sendToken.token`. In production it will arrive by WhatsApp — do **not** build the UI around reading it from the response.\n3. **Verify** — `POST /auth/verify` with `{ \"token\": \"...\" }`. Returns `{ authToken }` (JWT, **15 min**) and sets an httpOnly cookie `refreshToken` (**7 days**, `Secure`, `SameSite=Strict`).\n4. **Call protected routes** with header `Authorization: Bearer <authToken>`.\n5. **Refresh** — on a `401`, call `POST /auth/refresh` (cookie sent automatically) to get a new `authToken`, then retry.\n6. **Logout** — `POST /auth/logout` revokes the refresh token and clears the cookie.\n\nFrontend: send `credentials: 'include'` (fetch) or `withCredentials: true` (axios) on verify, refresh and logout so the cookie is stored and sent.\n\nJWT payload: `{ userId, role }` — `userId` is the customer's **phone** (role `CUSTOMER`) or the employee's **email** (role = employee role).\n\nIn this collection the Postman scripts do this for you: the login requests save `verificationToken`, Verify saves `authToken`, and the collection-level Bearer auth uses `{{authToken}}`.\n\n## 3. Roles\n\n`CUSTOMER` (customers only) and employee roles: `ADMIN, CASHIER, KITCHEN_STAFF, KITCHEN_CHEF, DELIVERY_DRIVER, WAITER, MANAGER, DEVELOPER, MARKETING, HR, FINANCE, CONTROLLER`.\n\nCurrently protected: all Orders routes (roles per route), CRM favorites/reviews (`CUSTOMER`), CRM preferences (any logged-in user), all Deliveries routes (`DELIVERY_DRIVER`). Catalog and Branch routes are **currently public** (no token needed) — this will change, so keep sending the Bearer header anyway.\n\n## 4. Request conventions\n\n- JSON bodies: header `Content-Type: application/json`.\n- Endpoints that accept an image use **multipart/form-data**; the file field is always named `image` (JPEG, PNG or WEBP, max 5 MB). Numbers sent as form-data are coerced by the server.\n- Phone numbers must be **E.164**: `+2376XXXXXXXX`.\n- Dates: ISO strings (`2005-11-24` or `2005-11-24T00:00:00.000Z`).\n- Never send `imageUrl`/`imagePath`, prices of order items, `customerPhone` or `verified` — the server sets them.\n- IDs are UUID strings, except: customers → `phone`, employees → `email`, shipping addresses → `name`.\n\n## 5. Response shapes (not uniform yet — handle both)\n\n| Module | Success | Error |\n|---|---|---|\n| Catalog, CRM, Deliveries, Orders | `{ data, meta? }` | `{ error: { message, code?, details? } }` |\n| Auth | raw object (e.g. `{ authToken }`, `{ message }`) | `{ error: \"string\" }` or `{ error: <ZodError> }` |\n| Branches / Shipping addresses | raw object or `{ message, branch }` / `{ message, shippingAddress }` | `{ error: \"string\" }` or `{ message, error: <ZodError> }` |\n| Auth middleware (any protected route) | — | `{ message: \"No token provided\" \\| \"Invalid or expired token\" \\| \"Insufficient permissions\" }` |\n| Global error handler | — | `{ error: { message, code } }` with codes `LIMIT_FILE_SIZE`, `INVALID_FILE_TYPE`, `INVALID_JSON`, `INTERNAL_ERROR` |\n\nRecommended client helper: read `body.error?.message ?? body.error ?? body.message`.\n\nValidation errors: catalog returns the raw Zod error in `error.details` (look at `details.issues[]` → `path`, `message`); CRM and Deliveries return flattened `error.details` as `{ fieldName: [\"message\"] }`; Orders return `error.details` as `[{ field, message }]`.\n\nBulk create endpoints for categories, subcategories, addons, branches and shipping addresses return `{ count: n }` only — refetch the list afterwards. Products and menus bulk endpoints return the full created records.\n\n## 6. Status codes\n\n`200` OK · `201` created · `400` validation / business rule · `401` no or invalid token · `403` wrong role / not allowed · `404` not found · `409` conflict (duplicate, still referenced, already claimed) · `500` server error.\n\n## 7. Known gaps (backend to-do)\n\n- No CORS middleware is registered yet → browser calls from another origin will be blocked until `cors({ origin, credentials: true })` is added.\n- No GET routes for menus yet; no DELETE routes for catalog items.\n- No payment endpoint yet (`Payments` is always empty on orders).\n- No pagination on list endpoints yet.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register a Customer",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"firstName\": \"Hinata\",\n    \"lastName\": \"Hyuga\",\n    \"email\": \"hinata.hyuga@gmail.com\",\n    \"gender\": \"Female\",\n    \"phone\": \"{{customerPhone}}\",\n    \"dateOfBirth\": \"2005-11-24\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/customers/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "customers",
+                "register"
+              ]
+            },
+            "description": "Creates a customer account. Public.\n\n**Body (JSON)**\n\n| Field | Type | Required | Rules |\n|---|---|---|---|\n| `firstName` | string | ✅ | 1–25 chars |\n| `lastName` | string | — | 1–50 chars |\n| `email` | string | — | valid email, unique |\n| `gender` | enum | — | `Male` \\| `Female` \\| `Other` |\n| `phone` | string | ✅ | E.164 (`+2376XXXXXXXX`), unique — this is the customer's ID |\n| `dateOfBirth` | date string | — | e.g. `2005-11-24` |\n\n**201 Created** — the customer object (no envelope):\n```json\n{\n  \"phone\": \"+237696000002\",\n  \"firstName\": \"Hinata\",\n  \"lastName\": \"Hyuga\",\n  \"email\": \"hinata.hyuga@gmail.com\",\n  \"gender\": \"Female\",\n  \"dateOfBirth\": \"2005-11-24T00:00:00.000Z\",\n  \"verified\": false,\n  \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n  \"updatedAt\": \"2026-09-24T10:00:00.000Z\"\n}\n```\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }` — invalid fields (`error.issues[]`)\n- `400` `{ \"error\": \"Customer with this phone number already exists\" }`\n- `500` `{ \"error\": \"Failed to register customer\" }` (also happens if the email is already used by another customer)\n\n`verified` becomes `true` after the first successful **Verify Token**. Next step: **Customer Login**."
+          },
+          "response": []
+        },
+        {
+          "name": "Register an Employee",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"firstName\": \"Marceline\",\n    \"lastName\": \"Abadeer\",\n    \"email\": \"{{employeeEmail}}\",\n    \"phone\": \"+237644000000\",\n    \"password\": \"bubblegum\",\n    \"role\": \"DELIVERY_DRIVER\",\n    \"branchId\": \"{{branchId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/employees/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "employees",
+                "register"
+              ]
+            },
+            "description": "Creates an employee (staff) account with a password and a role.\n\n⚠️ Intended for ADMIN/MANAGER use (staff management screen), but it is **currently public** — no token is checked yet.\n\n**Body (JSON)**\n\n| Field | Type | Required | Rules |\n|---|---|---|---|\n| `firstName` | string | ✅ | 1–50 chars |\n| `lastName` | string | ✅ | 1–50 chars |\n| `email` | string | ✅ | valid email, unique — this is the employee's ID |\n| `phone` | string | ✅ | E.164, unique |\n| `password` | string | ✅ | min 6 chars (stored hashed with bcrypt) |\n| `role` | enum | ✅ | `ADMIN, CASHIER, KITCHEN_STAFF, KITCHEN_CHEF, DELIVERY_DRIVER, WAITER, MANAGER, DEVELOPER, MARKETING, HR, FINANCE, CONTROLLER` |\n| `branchId` | string (UUID) | — | branch the employee works at. **Required in practice for `DELIVERY_DRIVER` and `CASHIER`** (deliveries and orders are filtered by the employee's branch) |\n\n**201 Created**\n```json\n{ \"message\": \"Account created with email: marcelineabadeer@vampirequeen.com\" }\n```\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }` — invalid fields\n- `400` `{ \"error\": \"Employee with this email already exists\" }`\n- `500` `{ \"error\": \"Failed to register employee\" }` (also: phone already used, or `branchId` does not exist)"
+          },
+          "response": []
+        },
+        {
+          "name": "Register an Admin",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"firstName\": \"Cheng\",\n    \"lastName\": \"Xiaoshi\",\n    \"email\": \"chengxiaoshi@yousracompany.com\",\n    \"phone\": \"+237644002000\",\n    \"password\": \"bubblegum\",\n    \"role\": \"ADMIN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/employees/register-admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "employees",
+                "register-admin"
+              ]
+            },
+            "description": "Creates an **ADMIN** account. Same body and validation as *Register an Employee*, but `role` must be `\"ADMIN\"`.\n\n⚠️ Currently public (no token checked). Use it only for the initial setup; it will be locked down.\n\n**Body (JSON)** — `firstName`, `lastName`, `email`, `phone` (E.164), `password` (min 6), `role: \"ADMIN\"`, optional `branchId`.\n\n**201 Created**\n```json\n{ \"message\": \"Admin account created with email: chengxiaoshi@yousracompany.com\" }\n```\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }`\n- `400` `{ \"error\": \"Only ADMIN role can be registered through this endpoint\" }`\n- `400` `{ \"error\": \"Admin with this email already exists\" }`\n- `500` `{ \"error\": \"Failed to register admin\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Customer Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.sendToken && json.sendToken.token) {",
+                  "    pm.collectionVariables.set('verificationToken', json.sendToken.token);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"phone\": \"{{customerPhone}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/customers/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "customers",
+                "login"
+              ]
+            },
+            "description": "Starts a passwordless login for a registered customer. Creates a one-time verification token valid **5 minutes**.\n\n**Body (JSON)**\n| Field | Type | Required | Rules |\n|---|---|---|---|\n| `phone` | string | ✅ | E.164, must belong to a registered customer |\n\n**200 OK** (dev mode — token returned in the body):\n```json\n{\n  \"message\": \"verification code sent\",\n  \"sendToken\": {\n    \"token\": \"da23210481f96e4cd980cd797ff0120a211e8f655669640f3d092deee96bf9d1\",\n    \"customerPhone\": \"+237696000002\",\n    \"employeeEmail\": null,\n    \"employeeRole\": null,\n    \"type\": \"verificationToken\",\n    \"revoked\": false,\n    \"expiresAt\": \"2026-09-24T10:05:00.000Z\",\n    \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n    \"updatedAt\": \"2026-09-24T10:00:00.000Z\"\n  }\n}\n```\n⚠️ In production the token will be delivered by WhatsApp (magic link) and `sendToken` will be removed from the response. UI: after this call show a \"Check your WhatsApp\" screen; the magic link will open the app with the token, which you then send to **Verify Token**.\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }` — phone not E.164\n- `400` `{ \"error\": \"Customer with this phone number does not exist\" }` → send the user to registration\n- `500` `{ \"error\": \"Failed to login customer\" }`\n\nPostman: the test script saves `sendToken.token` into `{{verificationToken}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Employee Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.sendToken && json.sendToken.token) {",
+                  "    pm.collectionVariables.set('verificationToken', json.sendToken.token);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{employeeEmail}}\",\n    \"password\": \"bubblegum\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/employees/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "employees",
+                "login"
+              ]
+            },
+            "description": "Employee login (any employee role, including ADMIN) with email + password. On success creates a verification token valid **5 minutes** — the employee still has to call **Verify Token** to get the JWT.\n\n**Body (JSON)**\n| Field | Type | Required | Rules |\n|---|---|---|---|\n| `email` | string | ✅ | valid email |\n| `password` | string | ✅ | min 6 chars |\n\n**200 OK** (dev mode):\n```json\n{\n  \"message\": \"Verification code sent\",\n  \"sendToken\": {\n    \"token\": \"7f3c...e91a\",\n    \"customerPhone\": null,\n    \"employeeEmail\": \"marcelineabadeer@vampirequeen.com\",\n    \"employeeRole\": \"DELIVERY_DRIVER\",\n    \"type\": \"verificationToken\",\n    \"revoked\": false,\n    \"expiresAt\": \"2026-09-24T10:05:00.000Z\",\n    \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n    \"updatedAt\": \"2026-09-24T10:00:00.000Z\"\n  }\n}\n```\nFor the staff apps you can chain Login → Verify automatically for now using `sendToken.token`; plan a code-entry step for later (code will be sent out of band).\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }`\n- `400` `{ \"error\": \"Invalid email or password\" }` (wrong email **or** wrong password — same message on purpose)\n- `500` `{ \"error\": \"Failed to login employee\" }`\n\nPostman: test script saves `{{verificationToken}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.sendToken && json.sendToken.token) {",
+                  "    pm.collectionVariables.set('verificationToken', json.sendToken.token);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"chengxiaoshi@yousracompany.com\",\n    \"password\": \"bubblegum\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/admins/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "admins",
+                "login"
+              ]
+            },
+            "description": "Back-office login restricted to employees with role `ADMIN`. Same body and flow as *Employee Login*.\n\n**Body (JSON)**: `email` (valid email), `password` (min 6).\n\n**200 OK** (dev mode):\n```json\n{\n  \"message\": \"Welcome Yousra Admin\",\n  \"sendToken\": { \"token\": \"...\", \"employeeEmail\": \"chengxiaoshi@yousracompany.com\", \"employeeRole\": \"ADMIN\", \"type\": \"verificationToken\", \"expiresAt\": \"...\" }\n}\n```\n\n**Errors**\n- `400` `{ \"error\": <ZodError> }`\n- `400` `{ \"error\": \"Invalid email or password\" }`\n- `403` `{ \"error\": \"Access denied. Only admins can log in through this endpoint.\" }`\n- `500` `{ \"error\": \"Failed to login admin\" }`\n\nPostman: test script saves `{{verificationToken}}`. Next: **Verify Token**."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Token (get access token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.authToken) {",
+                  "    pm.collectionVariables.set('authToken', json.authToken);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('authToken returned', () => pm.expect(json.authToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"token\": \"{{verificationToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "verify"
+              ]
+            },
+            "description": "Exchanges a verification token (from any of the three login endpoints) for an access token. Works for customers and employees. The verification token is single-use (deleted after success).\n\n**Body (JSON)**\n| Field | Type | Required |\n|---|---|---|\n| `token` | string | ✅ — the 64-char hex token from login |\n\n**200 OK**\n```json\n{ \"authToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\" }\n```\nAlso sets the cookie:\n`Set-Cookie: refreshToken=<jwt>; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`\n\n- `authToken` → JWT valid **15 minutes**, payload `{ userId, role }` (customer: `userId` = phone, `role` = `CUSTOMER`; employee: `userId` = email, `role` = employee role). Decode it on the client to know who is logged in and which screens to show.\n- Send it on every protected call: `Authorization: Bearer <authToken>`.\n- Keep it in memory (not localStorage) if possible; on reload, call **Refresh Access Token**.\n- The account is marked `verified: true`.\n\n⚠️ Frontend must call this with `credentials: 'include'` / `withCredentials: true`, otherwise the browser drops the refresh cookie.\n\n**Errors**\n- `400` `{ \"error\": \"Token is required\" }`\n- `400` `{ \"error\": \"Token has expired or is corrupted\" }` (unknown or already used)\n- `400` `{ \"error\": \"Token has expired\" }` (older than 5 min → login again)\n- `400` `{ \"error\": \"Invalid token\" }`\n- `500` `{ \"error\": \"Failed to verify token\" }`\n\nPostman: test script saves `authToken` into `{{authToken}}`, used by the collection-level Bearer auth."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.authToken) {",
+                  "    pm.collectionVariables.set('authToken', json.authToken);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Issues a new 15-minute access token using the `refreshToken` httpOnly cookie set by **Verify Token**. No body, no Authorization header.\n\n**When to call**\n- When any protected request returns `401` with `{ \"message\": \"Invalid or expired token\" }` → call refresh, store the new token, retry the original request once.\n- On app start / page reload to restore the session.\n\nFrontend: must use `credentials: 'include'` / `withCredentials: true` so the cookie is sent.\n\n**200 OK**\n```json\n{ \"authToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\" }\n```\nThe refresh token itself is **not** rotated; it stays valid until its 7-day expiry or logout.\n\n**Errors** (all `401` → treat as logged out, send to login)\n- `{ \"error\": \"No refresh token provided\" }`\n- `{ \"error\": \"Invalid or expired refresh token\" }`\n- `{ \"error\": \"Refresh token revoked or expired\" }` (after logout)\n- `500` `{ \"error\": \"Failed to refresh access token\" }`\n\nPostman note: the cookie is `Secure`, so Postman stores it for `https://` hosts and `localhost`. Test script saves the new `{{authToken}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('authToken', '');",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Logs the user out: marks the refresh token (from the cookie) as revoked and clears the `refreshToken` cookie. No body, no Authorization header required. Always succeeds, even if no cookie is present.\n\nFrontend: call with `credentials: 'include'`, then delete the in-memory `authToken` (existing access tokens stay technically valid until their 15-min expiry, so drop it client-side).\n\n**200 OK**\n```json\n{ \"message\": \"Logged out\" }\n```\n\n**Errors**: `500` `{ \"error\": \"Failed to logout\" }`\n\nPostman: test script clears `{{authToken}}`."
+          },
+          "response": []
+        }
+      ],
+      "description": "Registration, login, token verification, refresh and logout for customers, employees and admins.\n\nFlow: Register → Login (saves `{{verificationToken}}`) → Verify (saves `{{authToken}}`, sets `refreshToken` cookie) → call protected routes → Refresh on 401 → Logout.\n\nAll routes in this folder are public (no Bearer token)."
+    },
+    {
+      "name": "Catalog — Categories",
+      "item": [
+        {
+          "name": "Create a Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set('categoryId', json.data.id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "description": "Required. Category name",
+                  "type": "text",
+                  "key": "name",
+                  "value": "Pizzas"
+                },
+                {
+                  "description": "Required. Short description",
+                  "type": "text",
+                  "key": "description",
+                  "value": "Our wood-fired pizzas"
+                },
+                {
+                  "description": "Required. JPEG / PNG / WEBP, max 5 MB",
+                  "type": "file",
+                  "key": "image",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "categories"
+              ]
+            },
+            "description": "Creates a category with its image. **multipart/form-data** (let the browser/axios set the `Content-Type` boundary — do not set it manually).\n\nCurrently public (no token checked).\n\n**Form fields**\n| Field | Type | Required |\n|---|---|---|\n| `name` | text | ✅ |\n| `description` | text | ✅ |\n| `image` | file | ✅ JPEG/PNG/WEBP, ≤ 5 MB |\n\nThe server uploads the image to Supabase Storage and stores `imageUrl` (public URL to display) and `imagePath`.\n\n**201 Created**\n```json\n{\n  \"data\": {\n    \"id\": \"0b6f9a1e-3c1d-4f7a-9a55-2f4c8d1b7e10\",\n    \"name\": \"Pizzas\",\n    \"description\": \"Our wood-fired pizzas\",\n    \"imageUrl\": \"https://<project>.supabase.co/storage/v1/object/public/.../categories/xxx.webp\",\n    \"imagePath\": \"categories/xxx.webp\",\n    \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n    \"updatedAt\": \"2026-09-24T10:00:00.000Z\"\n  },\n  \"meta\": null\n}\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid product data\", \"details\": <ZodError> } }`\n- `400` `{ \"error\": { \"message\": \"Image file is required\" } }`\n- `400` `{ \"error\": { \"message\": \"Image must be 5 MB or smaller\", \"code\": \"LIMIT_FILE_SIZE\" } }`\n- `400` `{ \"error\": { \"message\": \"Only JPEG, PNG or WEBP images are allowed\", \"code\": \"INVALID_FILE_TYPE\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to create category\" } }`\n\nPostman: test script saves `data.id` into `{{categoryId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Categories (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    { \"name\": \"Pizzas\", \"description\": \"Our wood-fired pizzas\" },\n    { \"name\": \"Burgers\", \"description\": \"Grilled burgers and sandwiches\" },\n    { \"name\": \"Drinks\", \"description\": \"Juices, sodas and water\" }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/categories/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "categories",
+                "bulk"
+              ]
+            },
+            "description": "Creates several categories at once from a JSON array (bulk import, e.g. seeding the menu). **No images** in this endpoint — add them afterwards with **Update a Category** (`image` field).\n\n**Body (JSON array)** — each item: `{ \"name\": string, \"description\": string }` (both required).\n\n**201 Created** — Prisma `createMany` result (only a count, not the records):\n```json\n{ \"data\": { \"count\": 3 }, \"meta\": null }\n```\nRefetch **Get all Categories** to get the new IDs.\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid category data\", \"details\": <ZodError> } }` — `details.issues[].path` is like `[1, \"name\"]` (index of the bad item)\n- `500` `{ \"error\": { \"message\": \"Failed to create categories\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "categories"
+              ]
+            },
+            "description": "Lists all categories, each with its `products[]` and `subcategories[]` (flat objects, no variants/addons inside). Use this to build the menu navigation (category tabs → subcategory chips → product grid).\n\nNo pagination, no filters yet. Currently public.\n\n**200 OK**\n```json\n{\n  \"data\": [\n    {\n      \"id\": \"0b6f9a1e-...\",\n      \"name\": \"Pizzas\",\n      \"description\": \"Our wood-fired pizzas\",\n      \"imageUrl\": \"https://.../categories/xxx.webp\",\n      \"imagePath\": \"categories/xxx.webp\",\n      \"createdAt\": \"...\",\n      \"updatedAt\": \"...\",\n      \"products\": [ { \"id\": \"...\", \"name\": \"Margherita\", \"price\": 4500, \"imageUrl\": \"...\", \"categoryId\": \"0b6f9a1e-...\", \"subCategoryId\": \"...\", \"...\": \"...\" } ],\n      \"subcategories\": [ { \"id\": \"...\", \"name\": \"Classic\", \"categoryId\": \"0b6f9a1e-...\", \"...\": \"...\" } ]\n    }\n  ],\n  \"meta\": null\n}\n```\n\n**Errors**: `500` `{ \"error\": { \"message\": \"Failed to fetch categories\" } }`\n\nTip: `imageUrl` can be `null` for categories created via the bulk endpoint — show a placeholder."
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Category by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Gets one category by `id`, with its `products[]` and `subcategories[]`. Currently public.\n\n**Path params**: `id` — category UUID (`{{categoryId}}`).\n\n**200 OK** — `{ \"data\": { ...category, \"products\": [...], \"subcategories\": [...] }, \"meta\": null }` (same shape as one item of *Get all Categories*).\n\n**Errors**\n- `404` `{ \"error\": { \"message\": \"Category not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch category\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update a Category",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "type": "text",
+                  "value": "Pizzas & Calzones",
+                  "key": "name",
+                  "description": "Optional"
+                },
+                {
+                  "type": "text",
+                  "description": "Optional",
+                  "value": "Wood-fired pizzas and calzones",
+                  "key": "description",
+                  "disabled": true
+                },
+                {
+                  "type": "file",
+                  "key": "image",
+                  "description": "Optional. Replaces the current image (old one is deleted)",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "Partially updates a category. **multipart/form-data**. Send only the fields you want to change — every field is optional.\n\n**Path params**: `id` — category UUID.\n\n**Form fields** (all optional): `name`, `description`, `image` (file; JPEG/PNG/WEBP ≤ 5 MB). If `image` is sent, the new file is uploaded and the old one is deleted after the DB update succeeds.\n\n**200 OK**\n```json\n{ \"data\": { \"id\": \"...\", \"name\": \"Pizzas & Calzones\", \"description\": \"...\", \"imageUrl\": \"...\", \"imagePath\": \"...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }, \"meta\": null }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid category data\", \"details\": <ZodError> } }`\n- `400` image errors (`LIMIT_FILE_SIZE`, `INVALID_FILE_TYPE`)\n- `404` `{ \"error\": { \"message\": \"Category not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to update category\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Top-level menu categories (e.g. Pizzas, Drinks). Base path: `/api/v2/products/categories`.\n\nCategory object: `{ id, name, description, imageUrl, imagePath, createdAt, updatedAt }`. List and get-by-id also include `products[]` and `subcategories[]`."
+    },
+    {
+      "name": "Catalog — Subcategories",
+      "item": [
+        {
+          "name": "Create a Subcategory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set('subCategoryId', json.data.id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "type": "text",
+                  "description": "Required",
+                  "value": "Classic Pizzas"
+                },
+                {
+                  "key": "description",
+                  "type": "text",
+                  "description": "Required",
+                  "value": "The timeless recipes"
+                },
+                {
+                  "key": "categoryId",
+                  "type": "text",
+                  "description": "Required. UUID of the parent category",
+                  "value": "{{categoryId}}"
+                },
+                {
+                  "key": "image",
+                  "description": "Required. JPEG / PNG / WEBP, max 5 MB",
+                  "type": "file",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/subcategories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "subcategories"
+              ]
+            },
+            "description": "Creates a subcategory under a category, with its image. **multipart/form-data**. Currently public.\n\n**Form fields**\n| Field | Type | Required |\n|---|---|---|\n| `name` | text | ✅ |\n| `description` | text | ✅ |\n| `categoryId` | text (UUID) | ✅ must be an existing category |\n| `image` | file | ✅ JPEG/PNG/WEBP ≤ 5 MB |\n\n**201 Created**\n```json\n{\n  \"data\": {\n    \"id\": \"5d2c...\",\n    \"name\": \"Classic Pizzas\",\n    \"description\": \"The timeless recipes\",\n    \"categoryId\": \"0b6f9a1e-...\",\n    \"imageUrl\": \"https://.../subcategories/xxx.webp\",\n    \"imagePath\": \"subcategories/xxx.webp\",\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\"\n  },\n  \"meta\": null\n}\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid subcategory data\", \"details\": <ZodError> } }`\n- `400` `{ \"error\": { \"message\": \"Image file is required\" } }` / image errors\n- `500` `{ \"error\": { \"message\": \"Failed to create subcategory\" } }` (also when `categoryId` does not exist)\n\nPostman: saves `data.id` into `{{subCategoryId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Subcategories (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    { \"name\": \"Classic Pizzas\", \"description\": \"The timeless recipes\", \"categoryId\": \"{{categoryId}}\" },\n    { \"name\": \"Premium Pizzas\", \"description\": \"Chef specials\", \"categoryId\": \"{{categoryId}}\" }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/subcategories/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "subcategories",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates subcategories from a JSON array. **No images** (add them later with *Update a Subcategory*).\n\n**Body (JSON array)** — each item: `{ \"name\": string, \"description\": string, \"categoryId\": string (UUID) }`, all required.\n\n**201 Created**\n```json\n{ \"data\": { \"count\": 2 }, \"meta\": null }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid subcategory data\", \"details\": <ZodError> } }`\n- `500` `{ \"error\": { \"message\": \"Failed to create subcategories\" } }` (e.g. a `categoryId` that does not exist — the whole batch fails)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Subcategories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/subcategories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "subcategories"
+              ]
+            },
+            "description": "Lists all subcategories (flat — no products included). Filter by `categoryId` on the client, or use *Get all Categories* which already nests them. Currently public.\n\n**200 OK**\n```json\n{\n  \"data\": [\n    { \"id\": \"5d2c...\", \"name\": \"Classic Pizzas\", \"description\": \"...\", \"categoryId\": \"0b6f9a1e-...\", \"imageUrl\": \"...\", \"imagePath\": \"...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n  ],\n  \"meta\": null\n}\n```\n\n**Errors**: `500` `{ \"error\": { \"message\": \"Failed to fetch subcategories\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Subcategory by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/subcategories/{{subCategoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "subcategories",
+                "{{subCategoryId}}"
+              ]
+            },
+            "description": "Gets one subcategory with its `products[]` (flat products, no variants/addons). Currently public.\n\n**Path params**: `id` — subcategory UUID (`{{subCategoryId}}`).\n\n**200 OK**\n```json\n{ \"data\": { \"id\": \"5d2c...\", \"name\": \"Classic Pizzas\", \"categoryId\": \"...\", \"imageUrl\": \"...\", \"products\": [ { \"id\": \"...\", \"name\": \"Margherita\", \"price\": 4500, \"...\": \"...\" } ] }, \"meta\": null }\n```\n\n**Errors**\n- `404` `{ \"error\": { \"message\": \"Subcategory not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch subcategories\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update a Subcategory",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "type": "text",
+                  "description": "Optional",
+                  "value": "Classic Pizzas (Italian)"
+                },
+                {
+                  "key": "description",
+                  "type": "text",
+                  "value": "Traditional Italian recipes",
+                  "description": "Optional",
+                  "disabled": true
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "description": "Optional. Replaces the current image",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/subcategories/{{subCategoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "subcategories",
+                "{{subCategoryId}}"
+              ]
+            },
+            "description": "Partially updates a subcategory. **multipart/form-data**, all fields optional.\n\n**Path params**: `id` — subcategory UUID.\n\n**Form fields**: `name`, `description`, `image` (file). `categoryId` **cannot** be changed here (it is silently ignored if sent).\n\n**200 OK** — `{ \"data\": { ...updated subcategory }, \"meta\": null }`\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid subcategory data\", \"details\": <ZodError> } }` / image errors\n- `404` `{ \"error\": { \"message\": \"Subcategory not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to update subcategory\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Subcategories belong to one category (e.g. Pizzas → Classic, Premium). Base path: `/api/v2/products/subcategories`.\n\nSubcategory object: `{ id, name, description, categoryId, imageUrl, imagePath, createdAt, updatedAt }`."
+    },
+    {
+      "name": "Catalog — Products",
+      "item": [
+        {
+          "name": "Create a Product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set('productId', json.data.id);",
+                  "if (json.data && json.data.variants && json.data.variants.length) pm.collectionVariables.set('productVariantId', json.data.variants[0].id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "type": "text",
+                  "value": "Margherita",
+                  "key": "name",
+                  "description": "Required"
+                },
+                {
+                  "type": "text",
+                  "value": "Tomato, mozzarella, fresh basil",
+                  "key": "description",
+                  "description": "Required"
+                },
+                {
+                  "type": "text",
+                  "value": "{{categoryId}}",
+                  "key": "categoryId",
+                  "description": "Required. UUID"
+                },
+                {
+                  "type": "text",
+                  "value": "{{subCategoryId}}",
+                  "key": "subCategoryId",
+                  "description": "Optional. UUID"
+                },
+                {
+                  "type": "text",
+                  "value": "4500",
+                  "key": "price",
+                  "description": "Required. Base price in XAF, > 0"
+                },
+                {
+                  "type": "text",
+                  "value": "15",
+                  "key": "preparationTime",
+                  "description": "Optional. Minutes (integer)"
+                },
+                {
+                  "type": "text",
+                  "description": "Optional. Integer used for sorting 'popular' items",
+                  "value": "10",
+                  "key": "popularity",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "description": "Optional. Kitchen station UUID (KDS routing)",
+                  "value": "",
+                  "key": "stationId",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "value": "Medium",
+                  "key": "variants[0][name]",
+                  "description": "Variant 1 name"
+                },
+                {
+                  "type": "text",
+                  "value": "4500",
+                  "key": "variants[0][price]",
+                  "description": "Variant 1 full price"
+                },
+                {
+                  "type": "text",
+                  "value": "Large",
+                  "key": "variants[1][name]",
+                  "description": "Variant 2 name"
+                },
+                {
+                  "type": "text",
+                  "value": "6500",
+                  "key": "variants[1][price]",
+                  "description": "Variant 2 full price"
+                },
+                {
+                  "type": "text",
+                  "value": "Extra cheese",
+                  "key": "addons[0][name]",
+                  "description": "New addon (no id) — name"
+                },
+                {
+                  "type": "text",
+                  "value": "Extra mozzarella",
+                  "key": "addons[0][description]",
+                  "description": "New addon — description"
+                },
+                {
+                  "type": "text",
+                  "value": "500",
+                  "key": "addons[0][price]",
+                  "description": "New addon — price"
+                },
+                {
+                  "type": "text",
+                  "description": "Existing addon to link — its UUID",
+                  "value": "{{addonId}}",
+                  "key": "addons[1][id]",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "description": "Existing addon — name still required by validation (ignored)",
+                  "value": "Chili oil",
+                  "key": "addons[1][name]",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "description": "Existing addon — description still required (ignored)",
+                  "value": "Homemade chili oil",
+                  "key": "addons[1][description]",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "description": "Existing addon — price still required (ignored)",
+                  "value": "300",
+                  "key": "addons[1][price]",
+                  "disabled": true
+                },
+                {
+                  "type": "file",
+                  "key": "image",
+                  "description": "Required. JPEG / PNG / WEBP, max 5 MB",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "products"
+              ]
+            },
+            "description": "Creates a product with its image, and optionally its variants (sizes) and addons in one request. **multipart/form-data**. Currently public.\n\n**Form fields**\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `name` | text | ✅ | |\n| `description` | text | ✅ | |\n| `categoryId` | text (UUID) | ✅ | existing category |\n| `subCategoryId` | text (UUID) | — | existing subcategory |\n| `price` | number | ✅ | > 0, XAF (base price shown when there are no variants) |\n| `preparationTime` | integer | — | minutes |\n| `popularity` | integer | — | |\n| `stationId` | text (UUID) | — | kitchen station |\n| `variants[i][name]`, `variants[i][price]` | text / number | — | one pair per variant, `i` = 0, 1, 2… |\n| `addons[i][name]`, `addons[i][description]`, `addons[i][price]` | text / number | — | creates a **new** addon linked to the product |\n| `addons[i][id]` + name/description/price | text | — | links an **existing** addon. ⚠️ name/description/price are still required by validation but ignored |\n| `image` | file | ✅ | JPEG/PNG/WEBP ≤ 5 MB |\n\nNested fields use bracket notation. From JS:\n```js\nconst fd = new FormData();\nfd.append('name', 'Margherita');\nfd.append('price', '4500');\nvariants.forEach((v, i) => { fd.append(`variants[${i}][name]`, v.name); fd.append(`variants[${i}][price]`, v.price); });\naddons.forEach((a, i) => { if (a.id) fd.append(`addons[${i}][id]`, a.id); fd.append(`addons[${i}][name]`, a.name); fd.append(`addons[${i}][description]`, a.description); fd.append(`addons[${i}][price]`, a.price); });\nfd.append('image', file);\n```\n\n**201 Created**\n```json\n{\n  \"data\": {\n    \"id\": \"9e7d...\",\n    \"name\": \"Margherita\",\n    \"description\": \"Tomato, mozzarella, fresh basil\",\n    \"categoryId\": \"0b6f9a1e-...\",\n    \"subCategoryId\": \"5d2c...\",\n    \"stationId\": null,\n    \"price\": 4500,\n    \"imageUrl\": \"https://.../products/xxx.webp\",\n    \"imagePath\": \"products/xxx.webp\",\n    \"popularity\": null,\n    \"preparationTime\": 15,\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\",\n    \"addons\": [ { \"id\": \"a1...\", \"name\": \"Extra cheese\", \"description\": \"Extra mozzarella\", \"price\": 500, \"imageUrl\": null, \"imagePath\": null } ],\n    \"variants\": [\n      { \"id\": \"v1...\", \"name\": \"Medium\", \"price\": 4500, \"productId\": \"9e7d...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" },\n      { \"id\": \"v2...\", \"name\": \"Large\", \"price\": 6500, \"productId\": \"9e7d...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n    ]\n  },\n  \"meta\": null\n}\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid product data\" | \"Invalid addon data\" | \"Invalid variant data\", \"details\": <ZodError> } }`\n- `400` `{ \"error\": { \"message\": \"Image file is required\" } }` / image errors\n- `500` `{ \"error\": { \"message\": \"Failed to create product\" } }` (also: unknown `categoryId` / `subCategoryId` / addon `id`)\n\nPostman: saves `data.id` into `{{productId}}`. Disabled rows show how to link an existing addon."
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Products (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    {\n        \"name\": \"Pepperoni\",\n        \"description\": \"Tomato, mozzarella, beef pepperoni\",\n        \"categoryId\": \"{{categoryId}}\",\n        \"subCategoryId\": \"{{subCategoryId}}\",\n        \"price\": 5500,\n        \"preparationTime\": 15,\n        \"variants\": [\n            { \"name\": \"Medium\", \"price\": 5500 },\n            { \"name\": \"Large\", \"price\": 7500 }\n        ],\n        \"addons\": [\n            { \"name\": \"Extra pepperoni\", \"description\": \"Double pepperoni\", \"price\": 700 }\n        ]\n    },\n    {\n        \"name\": \"Four Cheese\",\n        \"description\": \"Mozzarella, gorgonzola, parmesan, goat cheese\",\n        \"categoryId\": \"{{categoryId}}\",\n        \"price\": 6000\n    }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/products/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "products",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates products (with their variants and addons) from a JSON array, in a single transaction — if one product fails, none are created. **No images** (add them later with *Update a Product*).\n\n**Body (JSON array)** — each item:\n| Field | Type | Required |\n|---|---|---|\n| `name` | string | ✅ |\n| `description` | string | ✅ |\n| `categoryId` | string (UUID) | ✅ |\n| `subCategoryId` | string (UUID) | — |\n| `stationId` | string (UUID) | — |\n| `price` | number > 0 | ✅ |\n| `popularity` | integer | — |\n| `preparationTime` | number | — |\n| `variants` | `[{ name, price }]` | — |\n| `addons` | `[{ id?, name, description, price }]` | — — with `id` → links existing addon; without → creates a new one |\n\n**201 Created** — here you get the full records (unlike other bulk endpoints):\n```json\n{ \"data\": [ { \"id\": \"...\", \"name\": \"Margherita\", \"price\": 4500, \"imageUrl\": null, \"addons\": [ ... ], \"variants\": [ ... ] } ], \"meta\": null }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid product data\", \"details\": <ZodError> } }`\n- `500` `{ \"error\": { \"message\": \"Failed to create products\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "products"
+              ]
+            },
+            "description": "Lists all products, each with its `addons[]` and `variants[]`. This is the main feed for the menu / POS product grid. Currently public.\n\nNo pagination, search or filter params yet — filter by `categoryId` / `subCategoryId` on the client.\n\n**200 OK**\n```json\n{\n  \"data\": [\n    {\n      \"id\": \"9e7d...\",\n      \"name\": \"Margherita\",\n      \"description\": \"Tomato, mozzarella, fresh basil\",\n      \"categoryId\": \"0b6f9a1e-...\",\n      \"subCategoryId\": \"5d2c...\",\n      \"stationId\": null,\n      \"price\": 4500,\n      \"imageUrl\": \"https://.../products/xxx.webp\",\n      \"imagePath\": \"products/xxx.webp\",\n      \"popularity\": null,\n      \"preparationTime\": 15,\n      \"createdAt\": \"...\",\n      \"updatedAt\": \"...\",\n      \"addons\": [ { \"id\": \"...\", \"name\": \"Extra cheese\", \"description\": \"...\", \"price\": 500, \"imageUrl\": null, \"imagePath\": null } ],\n      \"variants\": [ { \"id\": \"...\", \"name\": \"Large\", \"price\": 6500, \"productId\": \"9e7d...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } ]\n    }\n  ],\n  \"meta\": null\n}\n```\n\nDisplay rule: if `variants` is non-empty, show a size picker using each variant's `price` (full price); otherwise show `price`. Addon prices are added on top.\n\n**Errors**: `500` `{ \"error\": { \"message\": \"Failed to fetch products\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Product by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/products/{{productId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "description": "Gets one product with its `addons[]` and `variants[]` — use for the product detail / customization sheet. Currently public.\n\n**Path params**: `id` — product UUID (`{{productId}}`).\n\n**200 OK** — `{ \"data\": { ...product, \"addons\": [...], \"variants\": [...] }, \"meta\": null }` (same shape as one item of *Get all Products*).\n\n**Errors**\n- `404` `{ \"error\": { \"message\": \"Product not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch product\" } }`\n\nProduct reviews are on a separate endpoint: **CRM → Get reviews of a Product**."
+          },
+          "response": []
+        },
+        {
+          "name": "Update a Product",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "type": "text",
+                  "value": "5000",
+                  "description": "Optional",
+                  "key": "price"
+                },
+                {
+                  "type": "text",
+                  "value": "Margherita Classica",
+                  "description": "Optional",
+                  "key": "name",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "value": "San Marzano tomato, fior di latte, basil",
+                  "description": "Optional",
+                  "key": "description",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "value": "12",
+                  "description": "Optional. Minutes",
+                  "key": "preparationTime",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "value": "20",
+                  "description": "Optional",
+                  "key": "popularity",
+                  "disabled": true
+                },
+                {
+                  "type": "text",
+                  "value": "",
+                  "description": "Optional. Station UUID",
+                  "key": "stationId",
+                  "disabled": true
+                },
+                {
+                  "type": "file",
+                  "description": "Optional. Replaces the current image",
+                  "key": "image",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/products/{{productId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "products",
+                "{{productId}}"
+              ]
+            },
+            "description": "Partially updates a product's own fields and/or image. **multipart/form-data**, all fields optional.\n\n**Path params**: `id` — product UUID.\n\n**Updatable fields**: `name`, `description`, `price` (> 0), `preparationTime` (int), `popularity` (int), `stationId`, `image` (file).\n\n**Not updatable here** (silently ignored if sent): `categoryId`, `subCategoryId`, `variants`, `addons`. There is no endpoint yet to edit/remove variants or addon links of an existing product.\n\n**200 OK** — `{ \"data\": { ...updated product, \"addons\": [...], \"variants\": [...] }, \"meta\": null }`\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid product data\", \"details\": <ZodError> } }` / image errors\n- `404` `{ \"error\": { \"message\": \"Product not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to update product\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Sellable products, with optional variants (sizes) and addons (extras). Base path: `/api/v2/products/products`.\n\nProduct object: `{ id, name, description, categoryId, subCategoryId, stationId, price, imageUrl, imagePath, popularity, preparationTime, createdAt, updatedAt, addons[], variants[] }`.\n\nVariant: `{ id, name, price, productId }`. `price` on a variant is the full price for that size (not a surcharge)."
+    },
+    {
+      "name": "Catalog — Addons",
+      "item": [
+        {
+          "name": "Create an Addon",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set('addonId', json.data.id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "type": "text",
+                  "value": "Chili oil",
+                  "description": "Required",
+                  "key": "name"
+                },
+                {
+                  "type": "text",
+                  "value": "Homemade spicy chili oil",
+                  "description": "Required",
+                  "key": "description"
+                },
+                {
+                  "type": "text",
+                  "value": "300",
+                  "description": "Required. XAF",
+                  "key": "price"
+                },
+                {
+                  "type": "file",
+                  "key": "image",
+                  "description": "Required. JPEG / PNG / WEBP, max 5 MB",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/addons",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "addons"
+              ]
+            },
+            "description": "Creates a standalone addon (not linked to any product yet) with its image. Link it to products later via *Create a Product* (`addons[i][id]`). **multipart/form-data**. Currently public.\n\n**Form fields**: `name` ✅, `description` ✅, `price` ✅ (number, XAF), `image` ✅ (file).\n\n**201 Created**\n```json\n{ \"data\": { \"id\": \"a1b2...\", \"name\": \"Chili oil\", \"description\": \"Homemade spicy chili oil\", \"price\": 300, \"imageUrl\": \"https://.../addons/xxx.webp\", \"imagePath\": \"addons/xxx.webp\" }, \"meta\": null }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid addon data\", \"details\": <ZodError> } }`\n- `400` `{ \"error\": { \"message\": \"Image file is required\" } }` / image errors\n- `500` `{ \"error\": { \"message\": \"Failed to create addon\" } }`\n\nPostman: saves `data.id` into `{{addonId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Addons (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    { \"name\": \"Extra cheese\", \"description\": \"Extra mozzarella\", \"price\": 500 },\n    { \"name\": \"Mushrooms\", \"description\": \"Fresh sliced mushrooms\", \"price\": 400 },\n    { \"name\": \"Garlic sauce\", \"description\": \"Creamy garlic dip\", \"price\": 250 }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/addons/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "addons",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates standalone addons from a JSON array. **No images** (add later with *Update an Addon*).\n\n**Body (JSON array)** — each item: `{ \"name\": string, \"description\": string, \"price\": number }` (all required).\n\n**201 Created**\n```json\n{ \"data\": { \"count\": 3 }, \"meta\": null }\n```\nRefetch *Get all Addons* to get IDs.\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid addon data\", \"details\": <ZodError> } }`\n- `500` `{ \"error\": { \"message\": \"Failed to create addons\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Addons",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/addons",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "addons"
+              ]
+            },
+            "description": "Lists all addons (not filtered by product). For the addons of a given product use the `addons[]` array returned by the product endpoints. Currently public.\n\n**200 OK**\n```json\n{ \"data\": [ { \"id\": \"a1b2...\", \"name\": \"Chili oil\", \"description\": \"...\", \"price\": 300, \"imageUrl\": \"...\", \"imagePath\": \"...\" } ], \"meta\": null }\n```\n\n**Errors**: `500` `{ \"error\": { \"message\": \"Failed to fetch addons\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get an Addon by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/addons/{{addonId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "addons",
+                "{{addonId}}"
+              ]
+            },
+            "description": "Gets one addon by `id`. Currently public.\n\n**Path params**: `id` — addon UUID (`{{addonId}}`).\n\n**200 OK** — `{ \"data\": { \"id\": \"...\", \"name\": \"Chili oil\", \"description\": \"...\", \"price\": 300, \"imageUrl\": \"...\", \"imagePath\": \"...\" }, \"meta\": null }`\n\n**Errors**\n- `404` `{ \"error\": { \"message\": \"Addon not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch addons\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update an Addon",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "price",
+                  "type": "text",
+                  "description": "Optional",
+                  "value": "350"
+                },
+                {
+                  "key": "name",
+                  "type": "text",
+                  "value": "Hot chili oil",
+                  "description": "Optional",
+                  "disabled": true
+                },
+                {
+                  "key": "description",
+                  "type": "text",
+                  "value": "Extra spicy",
+                  "description": "Optional",
+                  "disabled": true
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "description": "Optional. Replaces the current image",
+                  "value": null,
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/addons/{{addonId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "addons",
+                "{{addonId}}"
+              ]
+            },
+            "description": "Partially updates an addon. **multipart/form-data**, all fields optional: `name`, `description`, `price`, `image` (file). A price change applies to every product using this addon.\n\n**Path params**: `id` — addon UUID.\n\n**200 OK** — `{ \"data\": { ...updated addon }, \"meta\": null }`\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid addon data\", \"details\": <ZodError> } }` / image errors\n- `404` `{ \"error\": { \"message\": \"Addon not found\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to update Addon\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Extras that can be attached to products (extra cheese, sauces...). Base path: `/api/v2/products/addons`.\n\nAddon object: `{ id, name, description, price, imageUrl, imagePath }`."
+    },
+    {
+      "name": "Catalog — Menus",
+      "item": [
+        {
+          "name": "Create a Menu",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "type": "text",
+                  "key": "name",
+                  "value": "Duo Pizza Deal",
+                  "description": "Required"
+                },
+                {
+                  "type": "text",
+                  "key": "description",
+                  "value": "2 medium pizzas + 2 drinks",
+                  "description": "Required"
+                },
+                {
+                  "type": "text",
+                  "key": "price",
+                  "value": "11000",
+                  "description": "Required. Combo price in XAF, > 0"
+                },
+                {
+                  "type": "text",
+                  "key": "categoryId",
+                  "value": "{{categoryId}}",
+                  "description": "Required. UUID"
+                },
+                {
+                  "type": "text",
+                  "key": "subCategoryId",
+                  "value": "{{subCategoryId}}",
+                  "description": "Required. UUID (note the capital C)"
+                },
+                {
+                  "type": "text",
+                  "key": "preparationTime",
+                  "value": "20",
+                  "description": "Optional. Minutes"
+                },
+                {
+                  "type": "text",
+                  "key": "MenuItems[0][productId]",
+                  "value": "{{productId}}",
+                  "description": "Item 1 — product UUID"
+                },
+                {
+                  "type": "text",
+                  "key": "MenuItems[0][quantity]",
+                  "value": "2",
+                  "description": "Item 1 — quantity (int > 0)"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "description": "Required. JPEG / PNG / WEBP, max 5 MB",
+                  "value": null
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/menus",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "menus"
+              ]
+            },
+            "description": "Creates a menu (combo deal) with its image and the products it contains. **multipart/form-data**. Currently public.\n\n**Form fields**\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `name` | text | ✅ | |\n| `description` | text | ✅ | |\n| `price` | number | ✅ | > 0, combo price in XAF |\n| `categoryId` | text (UUID) | ✅ | |\n| `subCategoryId` | text (UUID) | ✅ | ⚠️ exact casing `subCategoryId` |\n| `preparationTime` | integer | — | minutes |\n| `MenuItems[i][productId]` | text (UUID) | ✅ at least one | ⚠️ key starts with a capital **M** |\n| `MenuItems[i][quantity]` | integer > 0 | ✅ | |\n| `image` | file | ✅ | JPEG/PNG/WEBP ≤ 5 MB |\n\n**201 Created**\n```json\n{\n  \"data\": {\n    \"id\": \"m1...\",\n    \"name\": \"Duo Pizza Deal\",\n    \"description\": \"2 medium pizzas + 2 drinks\",\n    \"price\": 11000,\n    \"categoryId\": \"...\",\n    \"subCategoryId\": \"...\",\n    \"imageUrl\": \"https://.../menus/xxx.webp\",\n    \"imagePath\": \"menus/xxx.webp\",\n    \"preparationTime\": 20,\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\",\n    \"items\": [ { \"id\": \"...\", \"menuId\": \"m1...\", \"productId\": \"9e7d...\", \"quantity\": 2, \"createdAt\": \"...\", \"updatedAt\": \"...\" } ]\n  },\n  \"meta\": null\n}\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid menu data\", \"details\": <ZodError> } }`\n- `400` `{ \"error\": { \"message\": \"Image file is required\" } }` / image errors\n- `500` `{ \"error\": { \"message\": \"Failed to create menu\" } }` (also: a `productId` that does not exist)\n\nℹ️ There is no GET endpoint for menus yet."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) pm.collectionVariables.set('menuId', json.data.id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create many Menus (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    {\n        \"name\": \"Solo Deal\",\n        \"description\": \"1 medium pizza + 1 drink\",\n        \"price\": 6000,\n        \"categoryId\": \"{{categoryId}}\",\n        \"subCategoryId\": \"{{subCategoryId}}\",\n        \"preparationTime\": 15,\n        \"MenuItems\": [\n            { \"productId\": \"{{productId}}\", \"quantity\": 1 }\n        ]\n    }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products/menus/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "products",
+                "menus",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates menus (combos) with their items from a JSON array, in one transaction (all or nothing). **No images** — there is no menu update endpoint yet, so menus created here stay without an image for now.\n\n**Body (JSON array)** — each item:\n| Field | Type | Required |\n|---|---|---|\n| `name` | string | ✅ |\n| `description` | string | ✅ |\n| `price` | number > 0 | ✅ |\n| `categoryId` | string (UUID) | ✅ |\n| `subCategoryId` | string (UUID) | ✅ |\n| `preparationTime` | integer | — |\n| `MenuItems` | `[{ productId: UUID, quantity: int > 0 }]` | ✅ (capital **M**) |\n\n**201 Created** — full records:\n```json\n{ \"data\": [ { \"id\": \"...\", \"name\": \"Solo Deal\", \"price\": 6000, \"imageUrl\": null, \"items\": [ { \"productId\": \"...\", \"quantity\": 1 } ] } ], \"meta\": null }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid menu data\", \"details\": <ZodError> } }`\n- `500` `{ \"error\": { \"message\": \"Failed to create menus\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Menus are combos: a fixed price for a set of products with quantities. Base path: `/api/v2/products/menus`.\n\nOnly create endpoints exist for now (no GET/PATCH/DELETE yet)."
+    },
+    {
+      "name": "Branches",
+      "item": [
+        {
+          "name": "Create a Branch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.id) pm.collectionVariables.set('branchId', json.id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Pizzaland Bonamoussadi\",\n    \"region\": \"Littoral\",\n    \"city\": \"Douala\",\n    \"neighborhood\": \"Bonamoussadi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches"
+              ]
+            },
+            "description": "Creates a branch. JSON body. Currently public.\n\n**Body (JSON)**\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `name` | string | ✅ | |\n| `region` | string | ✅ | e.g. `Littoral` |\n| `city` | string | ✅ | |\n| `neighborhood` | string | ✅ | |\n| `managerEmail` | string (email) | — | must be an existing employee's email; one branch per manager (unique) |\n\n**201 Created** — raw branch object (⚠️ no `data` envelope):\n```json\n{\n  \"id\": \"b7c1...\",\n  \"name\": \"Pizzaland Bonamoussadi\",\n  \"region\": \"Littoral\",\n  \"city\": \"Douala\",\n  \"neighborhood\": \"Bonamoussadi\",\n  \"managerEmail\": null,\n  \"createdAt\": \"...\",\n  \"updatedAt\": \"...\"\n}\n```\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `409` `{ \"error\": \"A record with this value already exists\", \"fields\": [...] }` — this manager already manages a branch\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — `managerEmail` is not an employee\n- `500` `{ \"error\": \"Failed to create branch\" }`\n\nPostman: saves `id` into `{{branchId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Branches (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    { \"name\": \"Pizzaland Akwa\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Akwa\" },\n    { \"name\": \"Pizzaland Bastos\", \"region\": \"Centre\", \"city\": \"Yaoundé\", \"neighborhood\": \"Bastos\" }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates branches from a JSON array (min 1 item). Each item has the same fields as *Create a Branch*.\n\n**201 Created** — raw Prisma result (no envelope):\n```json\n{ \"count\": 2 }\n```\nRefetch *Get all Branches* for the IDs.\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }` (also for an empty array)\n- `409` duplicate / missing manager (see *Create a Branch*)\n- `500` `{ \"error\": \"Failed to create branches\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Branches",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches"
+              ]
+            },
+            "description": "Lists all branches (without shipping addresses). Use it for branch pickers (pickup / dine-in location, employee assignment). Currently public.\n\n**200 OK** — raw array (⚠️ no `data` envelope):\n```json\n[\n  { \"id\": \"b7c1...\", \"name\": \"Pizzaland Bonamoussadi\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Bonamoussadi\", \"managerEmail\": null, \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n]\n```\n\n**Errors**: `500` `{ \"error\": \"Failed to fetch branches\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Branch by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/{{branchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "{{branchId}}"
+              ]
+            },
+            "description": "Gets one branch with the delivery zones it serves (`shippingAddresses[]`). Currently public.\n\n**Path params**: `id` — branch UUID (`{{branchId}}`).\n\n**200 OK**\n```json\n{\n  \"message\": \"Request was successful\",\n  \"branch\": {\n    \"id\": \"b7c1...\",\n    \"name\": \"Pizzaland Bonamoussadi\",\n    \"region\": \"Littoral\",\n    \"city\": \"Douala\",\n    \"neighborhood\": \"Bonamoussadi\",\n    \"managerEmail\": null,\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\",\n    \"shippingAddresses\": [\n      { \"name\": \"Bonamoussadi Carrefour\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Bonamoussadi\", \"deliveryFee\": 1000, \"deliveryTime\": 30, \"branchId\": \"b7c1...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n    ]\n  }\n}\n```\n⚠️ The branch is under the `branch` key, not `data`.\n\n**Errors**\n- `404` `{ \"error\": \"Branch not found\" }`\n- `500` `{ \"error\": \"Failed to fetch branch\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update a Branch",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Pizzaland Bonamoussadi Carrefour\",\n    \"managerEmail\": \"{{employeeEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/{{branchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "{{branchId}}"
+              ]
+            },
+            "description": "Partially updates a branch. JSON body — send only the fields to change: `name`, `region`, `city`, `neighborhood`, `managerEmail` (existing employee email, unique across branches). Currently public.\n\n**Path params**: `id` — branch UUID.\n\n**200 OK**\n```json\n{ \"message\": \"Branch updated successfully\", \"branch\": { \"id\": \"b7c1...\", \"name\": \"...\", \"managerEmail\": \"manager@yousracompany.com\", \"...\": \"...\" } }\n```\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `404` `{ \"error\": \"Branch not found\" }`\n- `409` `{ \"error\": \"A record with this value already exists\", \"fields\": [...] }` — manager already assigned to another branch\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — `managerEmail` is not an employee\n- `500` `{ \"error\": \"Failed to update branch\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a Branch",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/{{branchId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "{{branchId}}"
+              ]
+            },
+            "description": "Permanently deletes a branch (hard delete). Currently public — restrict this action to ADMIN in the UI and ask for confirmation.\n\n**Path params**: `id` — branch UUID.\n\n**200 OK**\n```json\n{ \"message\": \"Branch deleted successfully\", \"branch\": { \"id\": \"b7c1...\", \"name\": \"...\", \"...\": \"...\" } }\n```\n\n**Errors**\n- `404` `{ \"error\": \"Branch not found\" }`\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — the branch still has employees, shipping addresses, orders, stations… Reassign/remove them first.\n- `500` `{ \"error\": \"Failed to delete branch\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete many Branches (bulk)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    \"{{branchId}}\",\n    \"00000000-0000-0000-0000-000000000000\"\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "bulk"
+              ]
+            },
+            "description": "Deletes several branches at once. **Body is a JSON array of branch IDs** (min 1). Hard delete. Currently public.\n\n⚠️ Axios: `DELETE` bodies must be passed as `axios.delete(url, { data: [...] })`.\n\n**200 OK**\n```json\n{ \"message\": \"Branches deleted successfully\", \"branches\": { \"count\": 2 } }\n```\nIDs that don't exist are simply skipped (count reflects what was actually deleted — a count of 0 still returns 200).\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — one of the branches is still referenced; nothing is deleted\n- `500` `{ \"error\": \"Failed to delete branches\" }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Restaurant branches. Base path: `/api/v2/branches`.\n\nBranch object: `{ id, name, region, city, neighborhood, managerEmail, createdAt, updatedAt }`.\n\n⚠️ This module does **not** use the `{ data }` envelope yet — see each request for the exact shape."
+    },
+    {
+      "name": "Shipping Addresses",
+      "item": [
+        {
+          "name": "Create a Shipping Address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.shippingAddress && json.shippingAddress.name) pm.collectionVariables.set('shippingAddressName', json.shippingAddress.name);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Bonamoussadi Carrefour\",\n    \"region\": \"Littoral\",\n    \"city\": \"Douala\",\n    \"neighborhood\": \"Bonamoussadi\",\n    \"deliveryFee\": 1000,\n    \"deliveryTime\": 30,\n    \"branchId\": \"{{branchId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses"
+              ]
+            },
+            "description": "Creates a delivery zone attached to a branch. JSON body. Currently public.\n\n**Body (JSON)**\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `name` | string | ✅ | **Primary key** — unique, shown to customers at checkout |\n| `region` | string | ✅ | |\n| `city` | string | ✅ | |\n| `neighborhood` | string | ✅ | |\n| `deliveryFee` | number ≥ 0 | ✅ | XAF. Must be a JSON number, not a string |\n| `deliveryTime` | integer ≥ 0 | ✅ | minutes. JSON number |\n| `branchId` | string (UUID) | ✅ | branch that serves this zone |\n\n**201 Created**\n```json\n{\n  \"message\": \"Operation is Successful!\",\n  \"shippingAddress\": {\n    \"name\": \"Bonamoussadi Carrefour\",\n    \"region\": \"Littoral\",\n    \"city\": \"Douala\",\n    \"neighborhood\": \"Bonamoussadi\",\n    \"deliveryFee\": 1000,\n    \"deliveryTime\": 30,\n    \"branchId\": \"b7c1...\",\n    \"createdAt\": \"...\",\n    \"updatedAt\": \"...\"\n  }\n}\n```\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `409` `{ \"error\": \"A record with this value already exists\", \"fields\": [\"name\"] }`\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — `branchId` does not exist\n- `500` `{ \"error\": \"Failed to create shipping address\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Create many Shipping Addresses (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    { \"name\": \"Makepe Missoke\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Makepe\", \"deliveryFee\": 1000, \"deliveryTime\": 30, \"branchId\": \"{{branchId}}\" },\n    { \"name\": \"Logpom Carrefour Bassong\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Logpom\", \"deliveryFee\": 1500, \"deliveryTime\": 40, \"branchId\": \"{{branchId}}\" },\n    { \"name\": \"Kotto Village\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Kotto\", \"deliveryFee\": 1500, \"deliveryTime\": 45, \"branchId\": \"{{branchId}}\" }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses",
+                "bulk"
+              ]
+            },
+            "description": "Bulk-creates delivery zones from a JSON array (min 1). Each item has the same fields as *Create a Shipping Address* (`deliveryFee` and `deliveryTime` as JSON numbers).\n\n**201 Created**\n```json\n{ \"message\": \"Operation is Successful!\", \"shippingAddresses\": { \"count\": 3 } }\n```\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `409` duplicate `name` or unknown `branchId` — the whole batch fails\n- `500` `{ \"error\": \"Failed to create shipping addresses\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get all Shipping Addresses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses"
+              ]
+            },
+            "description": "Lists all delivery zones across all branches. Use it for the delivery-address picker at checkout (show `name`, `deliveryFee`, `deliveryTime`). Currently public.\n\n**200 OK** — raw array (⚠️ no envelope):\n```json\n[\n  { \"name\": \"Bonamoussadi Carrefour\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Bonamoussadi\", \"deliveryFee\": 1000, \"deliveryTime\": 30, \"branchId\": \"b7c1...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n]\n```\n\n**Errors**: `500` `{ \"error\": \"Failed to fetch address\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Shipping Address by name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses/{{shippingAddressName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses",
+                "{{shippingAddressName}}"
+              ]
+            },
+            "description": "Gets one delivery zone by its **name** (the primary key). URL-encode the name: `encodeURIComponent('Bonamoussadi Carrefour')` → `Bonamoussadi%20Carrefour` (Postman encodes `{{shippingAddressName}}` automatically). Currently public.\n\n**Path params**: `name` — shipping address name.\n\n**200 OK**\n```json\n{\n  \"message\": \"Request was successful\",\n  \"shippingAddress\": { \"name\": \"Bonamoussadi Carrefour\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Bonamoussadi\", \"deliveryFee\": 1000, \"deliveryTime\": 30, \"branchId\": \"b7c1...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n}\n```\n\n**Errors**\n- `404` `{ \"error\": \"Shipping address not found\" }` (the name match is exact and case-sensitive)\n- `500` `{ \"error\": \"Failed to fetch address\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update a Shipping Address",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"deliveryFee\": 1200,\n    \"deliveryTime\": 35\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses/{{shippingAddressName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses",
+                "{{shippingAddressName}}"
+              ]
+            },
+            "description": "Partially updates a delivery zone. JSON body — send only what changes: `region`, `city`, `neighborhood`, `deliveryFee` (number ≥ 0), `deliveryTime` (int ≥ 0), `branchId`. Avoid changing `name` (it is the primary key and existing deliveries reference it — the change will be rejected with `409` if the zone is in use). Currently public.\n\n**Path params**: `name` — current shipping address name (URL-encoded).\n\n**200 OK**\n```json\n{ \"message\": \"Shipping address updated successfully\", \"shippingAddress\": { \"name\": \"Bonamoussadi Carrefour\", \"deliveryFee\": 1200, \"deliveryTime\": 35, \"...\": \"...\" } }\n```\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `404` `{ \"error\": \"Shipping address not found\" }`\n- `409` duplicate name / unknown `branchId` / zone still referenced\n- `500` `{ \"error\": \"Failed to update shipping address\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a Shipping Address",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses/{{shippingAddressName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses",
+                "{{shippingAddressName}}"
+              ]
+            },
+            "description": "Permanently deletes a delivery zone by name. Currently public — restrict to ADMIN/MANAGER in the UI.\n\n**Path params**: `name` — shipping address name (URL-encoded).\n\n**200 OK**\n```json\n{ \"message\": \"Shipping address deleted successfully\", \"shippingAddress\": { \"name\": \"Bonamoussadi Carrefour\", \"...\": \"...\" } }\n```\n\n**Errors**\n- `404` `{ \"error\": \"Shipping address not found\" }`\n- `409` `{ \"error\": \"Related record missing or record is still in use\", \"field\": \"...\" }` — deliveries or saved customer addresses still use this zone\n- `500` `{ \"error\": \"Failed to delete shipping address\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete many Shipping Addresses (bulk)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n    \"Kotto Village\",\n    \"Logpom Carrefour Bassong\"\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/branches/shipping-addresses/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "branches",
+                "shipping-addresses",
+                "bulk"
+              ]
+            },
+            "description": "Deletes several delivery zones at once. **Body is a JSON array of shipping address names** (min 1). Currently public.\n\n⚠️ Axios: `axios.delete(url, { data: [...] })`.\n\n**200 OK**\n```json\n{ \"message\": \"Shipping addresses deleted successfully\", \"shippingAddresses\": { \"count\": 2 } }\n```\nUnknown names are skipped (count 0 still returns 200).\n\n**Errors**\n- `400` `{ \"message\": \"Incorrect datatypes and schema\", \"error\": <ZodError> }`\n- `409` one of the zones is still referenced — nothing is deleted\n- `500` `{ \"error\": \"Failed to delete shipping addresses\" }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Delivery zones. Each zone belongs to one branch and carries the delivery fee (XAF) and delivery time (minutes). Delivery orders use the zone `name` to find the branch. Base path: `/api/v2/branches/shipping-addresses`.\n\nThe primary key is the **name** (e.g. `Bonamoussadi Carrefour`) — URL-encode it in paths (`Bonamoussadi%20Carrefour`).\n\nObject: `{ name, region, city, neighborhood, deliveryFee, deliveryTime, branchId, createdAt, updatedAt }`."
+    },
+    {
+      "name": "CRM",
+      "item": [
+        {
+          "name": "Get reviews of a Product (public)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/products/{{productId}}/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "products",
+                "{{productId}}",
+                "reviews"
+              ]
+            },
+            "description": "Public list of reviews for one product, newest first. Use it on the product detail page. No auth.\n\n**Path params**: `productId` — product UUID.\n\n**200 OK**\n```json\n{\n  \"data\": [\n    {\n      \"id\": \"r1...\",\n      \"customerPhone\": \"+237696000002\",\n      \"productId\": \"9e7d...\",\n      \"rating\": 5,\n      \"comment\": \"Best pizza in Douala!\",\n      \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n      \"updatedAt\": \"2026-09-24T10:00:00.000Z\",\n      \"customer\": { \"firstName\": \"Hinata\", \"lastName\": \"Hyuga\" }\n    }\n  ]\n}\n```\nDisplay `customer.firstName` / `lastName` as the reviewer. ⚠️ The review row itself still carries `customerPhone` (backend fix pending) — never display it.\n\nAverage rating is not computed by the API — compute it on the client (`sum(rating) / length`).\n\nAn unknown `productId` returns `200` with `data: []`.\n\n**Errors**: `500` `{ \"error\": { \"message\": \"Failed to fetch reviews\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Add a Favorite (customer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"productId\": \"{{productId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/favorites",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "favorites"
+              ]
+            },
+            "description": "Adds a product to the logged-in customer's favorites. **Auth: Bearer token, role `CUSTOMER`** (log in with *Customer Login* → *Verify Token*). The customer is taken from the token — do not send a phone.\n\nIdempotent: favoriting the same product twice returns the existing favorite (no duplicate, no error) — safe for a heart toggle \"on\".\n\n**Body (JSON)**\n| Field | Type | Required |\n|---|---|---|\n| `productId` | string (UUID) | ✅ |\n\n**200 OK**\n```json\n{ \"data\": { \"id\": \"f1...\", \"customerPhone\": \"+237696000002\", \"productId\": \"9e7d...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid favorite data\", \"details\": { \"productId\": [\"...\"] } } }`\n- `401` `{ \"message\": \"No token provided\" | \"Invalid or expired token\" }`\n- `403` `{ \"message\": \"Insufficient permissions\" }` — token is not a customer's\n- `404` `{ \"error\": { \"message\": \"Product not found\", \"code\": \"NOT_FOUND\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to add favorite product\" } }`\n\nℹ️ There is no \"remove favorite\" endpoint yet."
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Favorites (customer)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/favorites",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "favorites"
+              ]
+            },
+            "description": "Lists the logged-in customer's favorites, each with the full `product` object (for a \"My favorites\" screen). **Auth: Bearer, role `CUSTOMER`.**\n\n**200 OK**\n```json\n{\n  \"data\": [\n    {\n      \"id\": \"f1...\",\n      \"customerPhone\": \"+237696000002\",\n      \"productId\": \"9e7d...\",\n      \"createdAt\": \"...\",\n      \"updatedAt\": \"...\",\n      \"product\": { \"id\": \"9e7d...\", \"name\": \"Margherita\", \"price\": 4500, \"imageUrl\": \"...\", \"categoryId\": \"...\", \"...\": \"...\" }\n    }\n  ]\n}\n```\nThe nested `product` does not include variants/addons — fetch *Get a Product by ID* when the customer opens it.\n\n**Errors**\n- `401` / `403` (see *Add a Favorite*)\n- `500` `{ \"error\": { \"message\": \"Failed to fetch favorites\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Add a Review (customer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"productId\": \"{{productId}}\",\n    \"rating\": 5,\n    \"comment\": \"Best pizza in Douala!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "reviews"
+              ]
+            },
+            "description": "Posts a review on a product for the logged-in customer. **Auth: Bearer, role `CUSTOMER`.** The author comes from the token.\n\n**Body (JSON)**\n| Field | Type | Required | Rules |\n|---|---|---|---|\n| `productId` | string (UUID) | ✅ | existing product |\n| `rating` | integer | ✅ | 1–5, whole numbers only (4.5 is rejected) |\n| `comment` | string | — | |\n\nA customer can post several reviews for the same product (no uniqueness check, no edit/delete yet) — prevent double submits in the UI.\n\n**201 Created**\n```json\n{ \"data\": { \"id\": \"r1...\", \"customerPhone\": \"+237696000002\", \"productId\": \"9e7d...\", \"rating\": 5, \"comment\": \"Best pizza in Douala!\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid review data\", \"details\": { \"rating\": [\"Too big: expected number to be <=5\"] } } }`\n- `401` / `403` (not logged in / not a customer)\n- `404` `{ \"error\": { \"message\": \"Product not found\", \"code\": \"NOT_FOUND\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to add review\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Reviews (customer)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "reviews"
+              ]
+            },
+            "description": "Lists the reviews written by the logged-in customer, newest first (\"My reviews\" screen). **Auth: Bearer, role `CUSTOMER`.**\n\n**200 OK**\n```json\n{ \"data\": [ { \"id\": \"r1...\", \"customerPhone\": \"+237696000002\", \"productId\": \"9e7d...\", \"rating\": 5, \"comment\": \"...\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } ] }\n```\nThe product itself is not included — match `productId` against your cached product list.\n\n**Errors**\n- `401` / `403`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch reviews\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Set a Preference (any user)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"preferredLanguage\",\n    \"value\": \"en\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "preferences"
+              ]
+            },
+            "description": "Sets one preference for the logged-in user — works for **customers and employees** (any role). **Auth: Bearer (any logged-in user).** The owner comes from the token.\n\nUpsert behaviour: one value per preference name per user. If it already exists it is updated (`200`), otherwise created (`201`). Call it once per preference.\n\n**Body (JSON)**\n| Field | Type | Required | Allowed values |\n|---|---|---|---|\n| `name` | enum | ✅ | `preferredPaymentMethod`, `preferredDeliveryAddress`, `preferredLanguage`, `preferredCurrency`, `favoriteCategory`, `favoriteSubcategory`, `favoriteProduct`, `favoriteMenu`, `notificationPreferences`, `marketingOptIn` |\n| `value` | string | ✅ | non-empty; always a **string** (e.g. `\"en\"`, `\"true\"`, a UUID, a shipping address name) |\n\nImportant: `preferredLanguage` (`\"en\"` or `\"fr\"`, default `fr`) decides the language of WhatsApp messages (login link, receipts). Set it from the language switcher.\n\n**201 Created / 200 OK**\n```json\n{ \"data\": { \"id\": \"p1...\", \"customerPhone\": \"+237696000002\", \"employeeEmail\": null, \"name\": \"preferredLanguage\", \"value\": \"en\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } }\n```\n\n**Errors**\n- `400` `{ \"error\": { \"message\": \"Invalid preference data\", \"details\": { \"name\": [\"Invalid preference name\"] } } }`\n- `401` `{ \"message\": \"No token provided\" | \"Invalid or expired token\" }`\n- `500` `{ \"error\": { \"message\": \"Failed to save user preference\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Preferences (any user)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/crm/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "crm",
+                "preferences"
+              ]
+            },
+            "description": "Gets all preferences of the logged-in user (customer or employee). **Auth: Bearer (any logged-in user).** Call it right after login to restore language, preferred delivery zone, etc.\n\n**200 OK**\n```json\n{\n  \"data\": [\n    { \"id\": \"p1...\", \"customerPhone\": \"+237696000002\", \"employeeEmail\": null, \"name\": \"preferredLanguage\", \"value\": \"en\", \"createdAt\": \"...\", \"updatedAt\": \"...\" },\n    { \"id\": \"p2...\", \"customerPhone\": \"+237696000002\", \"employeeEmail\": null, \"name\": \"preferredDeliveryAddress\", \"value\": \"Bonamoussadi Carrefour\", \"createdAt\": \"...\", \"updatedAt\": \"...\" }\n  ]\n}\n```\nTip: turn it into a map on the client: `Object.fromEntries(data.map(p => [p.name, p.value]))`. Missing names mean \"not set\" (use defaults, e.g. language `fr`).\n\n**Errors**\n- `401` `{ \"message\": \"No token provided\" | \"Invalid or expired token\" }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch user preferences\" } }`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Customer favorites, reviews and user preferences. Base path: `/api/v2/crm`.\n\nThe owner is always taken from the token (`customerPhone` for customers, employee email for staff) — never send it in the body."
+    },
+    {
+      "name": "Deliveries (Driver app)",
+      "item": [
+        {
+          "name": "Get available Deliveries (my branch)",
+          "event": [
+            {
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.length) pm.collectionVariables.set('deliveryId', json.data[0].id);",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              },
+              "listen": "test"
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/deliveries/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "deliveries",
+                "available"
+              ]
+            },
+            "description": "Delivery \"job board\" for drivers: all **unclaimed, pending** deliveries whose order belongs to the driver's branch, soonest estimated delivery first. **Auth: Bearer, role `DELIVERY_DRIVER`** (log in with *Employee Login* → *Verify Token*). The driver must have a `branchId`.\n\nPoll this every 15–30 s (no websockets yet).\n\n**200 OK**\n```json\n{\n  \"data\": [\n    {\n      \"id\": \"d1...\",\n      \"orderNumber\": \"3f6c9d2e-8a41-4b7e-9c55-0e1d2a7b9f10\",\n      \"driverEmail\": null,\n      \"status\": \"pending\",\n      \"estimatedDeliveryTime\": \"2026-09-24T11:10:00.000Z\",\n      \"actualDeliveryTime\": null,\n      \"shippingAddressName\": \"Bonamoussadi Carrefour\",\n      \"createdAt\": \"...\",\n      \"updatedAt\": \"...\",\n      \"shippingAddress\": { \"name\": \"Bonamoussadi Carrefour\", \"region\": \"Littoral\", \"city\": \"Douala\", \"neighborhood\": \"Bonamoussadi\", \"deliveryFee\": 1000, \"deliveryTime\": 30 },\n      \"order\": {\n        \"number\": \"3f6c9d2e-8a41-4b7e-9c55-0e1d2a7b9f10\",\n        \"status\": \"ready_for_delivery\",\n        \"subtotal\": 9000,\n        \"discount\": 0,\n        \"total\": 10000,\n        \"createdAt\": \"...\",\n        \"customer\": { \"phone\": \"+237696000002\", \"firstName\": \"Hinata\", \"lastName\": \"Hyuga\" },\n        \"items\": [\n          { \"quantity\": 2, \"price\": 4500, \"product\": { \"name\": \"Margherita\" }, \"menu\": null }\n        ],\n        \"Payments\": [ { \"amount\": 10000, \"method\": \"CASH\", \"status\": \"pending\" } ]\n      }\n    }\n  ]\n}\n```\nNotes: the order number is a UUID. Payment `method` is one of `CASH`, `MONETBIL`, `CARD`, `PAYPAL`, `PAYROLL_DEDUCTION` (payments are not created by the API yet, so this list is empty for now). A delivery appears here as soon as the order is created, even while the kitchen is still preparing it — show `order.status` and only let the driver leave once it is `ready_for_delivery`. `items[].product` or `items[].menu` is `null` depending on the item type (addon lines have both `null`). `Payments` has a capital **P**. If no payment is `completed`, show \"collect cash\".\n\n**Errors**\n- `401` `{ \"message\": \"No token provided\" | \"Invalid or expired token\" }`\n- `403` `{ \"message\": \"Insufficient permissions\" }` — not a driver\n- `403` `{ \"error\": { \"message\": \"Not assigned to a branch\", \"code\": \"NO_BRANCH\" } }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch deliveries\", \"code\": \"FETCH_FAILED\" } }`\n\nPostman: saves the first delivery's `id` into `{{deliveryId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Claim a Delivery",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/deliveries/{{deliveryId}}/claim",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "deliveries",
+                "{{deliveryId}}",
+                "claim"
+              ]
+            },
+            "description": "The driver takes a delivery. **Auth: Bearer, role `DELIVERY_DRIVER`.** No body.\n\nRace-safe: if two drivers claim at the same time only one wins; the other gets `409`. On success the delivery becomes `assigned` to this driver.\n\n**Path params**: `deliveryId` — delivery UUID (from *Get available Deliveries*).\n\n**200 OK** — the claimed delivery, same shape as the available list items but with:\n```json\n{ \"data\": { \"id\": \"d1...\", \"driverEmail\": \"marcelineabadeer@vampirequeen.com\", \"status\": \"assigned\", \"shippingAddress\": { \"...\": \"...\" }, \"order\": { \"...\": \"...\" } } }\n```\n\n**Errors** (all `{ \"error\": { \"message\": \"...\", \"code\": \"CLAIM_FAILED\" } }`)\n- `400` `Invalid request` (`code: INVALID_PARAM`)\n- `403` `Not assigned to a branch`\n- `403` `Delivery is not at your branch`\n- `404` `Delivery not found`\n- `409` `Delivery already claimed` → refresh the list and show a toast\n- `500` `Failed to claim delivery`\n- plus `401`/`403` from the auth middleware"
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Deliveries (active / history)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/deliveries/mine?view=active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "deliveries",
+                "mine"
+              ],
+              "query": [
+                {
+                  "key": "view",
+                  "description": "active (default) = assigned + in_transit; history = delivered + failed",
+                  "value": "active"
+                }
+              ]
+            },
+            "description": "The logged-in driver's own deliveries. **Auth: Bearer, role `DELIVERY_DRIVER`.**\n\n**Query params**\n| Param | Values | Default |\n|---|---|---|\n| `view` | `active` → statuses `assigned`, `in_transit` (current jobs) · `history` → `delivered`, `failed` | `active` (any other value is treated as `active`) |\n\nSorted by `estimatedDeliveryTime` ascending.\n\n**200 OK** — `{ \"data\": [ ...deliveries, same shape as *Get available Deliveries* ] }`\n\n**Errors**\n- `401` `{ \"error\": { \"message\": \"Authentication required\", \"code\": \"UNAUTHENTICATED\" } }` or auth-middleware `401`\n- `403` `{ \"message\": \"Insufficient permissions\" }`\n- `500` `{ \"error\": { \"message\": \"Failed to fetch deliveries\", \"code\": \"FETCH_FAILED\" } }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Delivery status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"in_transit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/deliveries/{{deliveryId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "deliveries",
+                "{{deliveryId}}",
+                "status"
+              ]
+            },
+            "description": "The driver moves one of **their own** deliveries forward. **Auth: Bearer, role `DELIVERY_DRIVER`.**\n\n**Body (JSON)**\n| Field | Type | Required | Values |\n|---|---|---|---|\n| `status` | enum | ✅ | `in_transit` · `delivered` · `failed` |\n\n**Allowed transitions** (enforced server-side)\n| From → To | Allowed | Side effect on the order |\n|---|---|---|\n| `assigned` → `in_transit` | ✅ (picked up) | order status → `out_for_delivery` |\n| `assigned` / `in_transit` → `delivered` | ✅ | order status → `delivered`, `actualDeliveryTime` = now |\n| `assigned` / `in_transit` → `failed` | ✅ | order status unchanged |\n| `delivered` / `failed` → anything | ❌ `409` (final states) |\n\nUI suggestion: buttons \"Picked up\" → `in_transit`, then \"Delivered\" / \"Failed\". Confirm before sending `failed`.\n\n**Path params**: `deliveryId` — delivery UUID.\n\n**200 OK** — `{ \"data\": { ...updated delivery, same shape as the list items } }`\n\n**Errors** (`code: STATUS_UPDATE_FAILED` unless noted)\n- `400` `{ \"error\": { \"message\": \"Invalid status\", \"code\": \"INVALID_BODY\", \"details\": { \"status\": [\"...\"] } } }`\n- `400` `Invalid request` (`INVALID_PARAM`)\n- `403` `Not your delivery`\n- `404` `Delivery not found`\n- `409` `Delivery status cannot be changed` — invalid transition (e.g. `in_transit` twice, or already delivered)\n- `500` `Failed to update delivery status`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints for the delivery-driver app. Every route requires a Bearer token with role `DELIVERY_DRIVER`, and the driver must be assigned to a branch (`branchId` on the employee).\n\nDelivery lifecycle: `pending` → (claim) `assigned` → `in_transit` → `delivered` | `failed`. Moving to `in_transit` sets the order to `out_for_delivery`; `delivered` sets the order to `delivered`.\n\nEach delivery returned includes `shippingAddress` (zone, fee, time) and `order` (number, status, totals, customer phone/name, items, payments) so the driver knows where to go, who to call and whether to collect cash."
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Create a Delivery order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.number) pm.collectionVariables.set('orderNumber', json.data.number);",
+                  "if (json.data && json.data.items && json.data.items.length) pm.collectionVariables.set('orderItemId', json.data.items[0].id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"orderType\": \"delivery\",\n    \"shippingAddressName\": \"{{shippingAddressName}}\",\n    \"items\": [\n        { \"type\": \"product\", \"productId\": \"{{productId}}\", \"productVariantId\": \"{{productVariantId}}\", \"quantity\": 1 },\n        { \"type\": \"addons\", \"addonId\": \"{{addonId}}\", \"quantity\": 1 }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders"
+              ]
+            },
+            "description": "# Orders module — overview\n\nAll order routes need a Bearer token. Base path: `/api/v2/orders`.\n\n| Route | Who |\n|---|---|\n| `POST /` create | `CUSTOMER`, `CASHIER`, `WAITER`, `MANAGER`, `ADMIN` |\n| `GET /mine` | `CUSTOMER` |\n| `GET /branch` | `CASHIER`, `WAITER`, `KITCHEN_STAFF`, `KITCHEN_CHEF`, `MANAGER`, `ADMIN` |\n| `PATCH /:number/dispatch` | `KITCHEN_CHEF`, `MANAGER`, `ADMIN` |\n| `PATCH /items/:itemId/status` | `KITCHEN_STAFF`, `KITCHEN_CHEF` |\n| `PATCH /:number` | `CASHIER`, `MANAGER`, `ADMIN` |\n| `DELETE /` | `ADMIN` |\n\n**Order lifecycle**: `pending` → (chef dispatches) `kitchen` → (all items ready) `ready` (pickup/dine-in) or `ready_for_delivery` → (driver picks up) `out_for_delivery` → `delivered`. Pickup/dine-in finish with `successful` (set by the cashier via *Update an Order*). `cancelled` can be set by the cashier. Final statuses: `successful`, `delivered`, `cancelled`.\n\n**Item statuses**: `pending` → `in_station` (on dispatch) → `preparing` → `ready` / `complete` (also `out_of_station`).\n\nThe order ID is `number` (a **UUID**, not a short human number — show e.g. the last 6 characters on screens).\n\n---\n\n# Create a Delivery order\n\nCreates an order. The server computes **everything** except what's ordered: prices, subtotal, delivery fee, total, branch, statuses, estimated delivery time. **Never send prices.**\n\n**Auth**: Bearer — `CUSTOMER` (app) or `CASHIER` / `WAITER` / `MANAGER` / `ADMIN` (POS).\n\n**Body (JSON)** — `orderType: \"delivery\"`\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `orderType` | `\"delivery\"` | ✅ | |\n| `shippingAddressName` | string | ✅ | a delivery zone name (from *Get all Shipping Addresses*). Decides the branch, delivery fee and ETA |\n| `customerPhone` | E.164 | staff: ✅ / customer: ignored | For customers it comes from the token. For staff it must be a **registered** customer (walk-ins can't order delivery) |\n| `items` | array (min 1) | ✅ | see below |\n\n**Items** — one entry per line:\n| Field | Type | When |\n|---|---|---|\n| `type` | `\"product\"` \\| `\"menu\"` \\| `\"addons\"` (plural!) | always |\n| `quantity` | integer ≥ 1 (JSON number) | always |\n| `productId` | UUID | `type: \"product\"` |\n| `productVariantId` | UUID | `type: \"product\"` **and the product has variants** — required then (e.g. size), must belong to that product |\n| `menuId` | UUID | `type: \"menu\"` |\n| `addonId` | UUID | `type: \"addons\"` |\n\n⚠️ Addons are **separate lines**, not nested inside a product line. For \"Margherita Large + extra cheese\", send two items.\n\n**Pricing**: product without variants → `product.price`; with variants → the chosen variant's `price`; menu → `menu.price`; addon → `addon.price`. `subtotal = Σ price × quantity`, `discount = 0`, `total = subtotal − discount + deliveryFee`.\n\n**201 Created**\n```json\n{\n  \"data\": {\n    \"number\": \"3f6c9d2e-8a41-4b7e-9c55-0e1d2a7b9f10\",\n    \"branchId\": \"b7c1...\",\n    \"cashierEmail\": null,\n    \"customerPhone\": \"+237696000002\",\n    \"employeeEmail\": null,\n    \"discount\": 0,\n    \"subtotal\": 7000,\n    \"status\": \"pending\",\n    \"total\": 8000,\n    \"orderType\": \"delivery\",\n    \"createdAt\": \"2026-09-24T10:00:00.000Z\",\n    \"updatedAt\": \"2026-09-24T10:00:00.000Z\",\n    \"customer\": { \"phone\": \"+237696000002\", \"firstName\": \"Hinata\", \"lastName\": \"Hyuga\" },\n    \"items\": [\n      {\n        \"id\": \"i1...\", \"orderNumber\": \"3f6c9d2e-...\", \"productId\": \"9e7d...\", \"productVariantId\": \"v2...\",\n        \"menuId\": null, \"addonId\": null, \"quantity\": 1, \"price\": 6500, \"status\": \"pending\", \"type\": \"product\",\n        \"estimatedReadyAt\": \"...\", \"createdAt\": \"...\", \"updatedAt\": \"...\",\n        \"product\": { \"id\": \"9e7d...\", \"name\": \"Margherita\", \"price\": 4500 },\n        \"menu\": null\n      },\n      {\n        \"id\": \"i2...\", \"orderNumber\": \"3f6c9d2e-...\", \"productId\": null, \"productVariantId\": null,\n        \"menuId\": null, \"addonId\": \"a1...\", \"quantity\": 1, \"price\": 500, \"status\": \"pending\", \"type\": \"addons\",\n        \"estimatedReadyAt\": \"...\", \"createdAt\": \"...\", \"updatedAt\": \"...\",\n        \"product\": null, \"menu\": null\n      }\n    ],\n    \"pickupOrders\": [],\n    \"dineInOrders\": [],\n    \"deliveries\": [\n      {\n        \"id\": \"d1...\", \"orderNumber\": \"3f6c9d2e-...\", \"driverEmail\": null, \"status\": \"pending\",\n        \"estimatedDeliveryTime\": \"2026-09-24T10:30:00.000Z\", \"actualDeliveryTime\": null,\n        \"shippingAddressName\": \"Bonamoussadi Carrefour\", \"createdAt\": \"...\", \"updatedAt\": \"...\",\n        \"shippingAddress\": { \"name\": \"Bonamoussadi Carrefour\", \"neighborhood\": \"Bonamoussadi\", \"deliveryFee\": 1000, \"deliveryTime\": 30 },\n        \"driver\": null\n      }\n    ],\n    \"Payments\": []\n  }\n}\n```\nThis is the **full order shape** returned by every order endpoint. Notes for display:\n- `items[].price` is the unit price actually charged (variant price here: 6500), while `items[].product.price` is the product's base price — show `items[].price`.\n- Variant name and addon name are **not** included (only `productVariantId` / `addonId`) — resolve them from your cached product/addon lists.\n- `pickupOrders`, `dineInOrders`, `deliveries` are arrays; only the one matching `orderType` has an entry.\n- Delivery fee = `total − subtotal + discount` (or `deliveries[0].shippingAddress.deliveryFee`).\n- `Payments` (capital P) is empty — there is no payment endpoint yet.\n\n**Errors** — all `{ \"error\": { \"message\", \"code\" } }`\n- `400 VALIDATION_ERROR` — `details: [{ \"field\": \"items.0.quantity\", \"message\": \"...\" }]`\n- `400 CUSTOMER_REQUIRED` — staff delivery order without `customerPhone`\n- `400 CUSTOMER_NOT_FOUND` — staff entered an unregistered phone\n- `400 ADDRESS_NOT_FOUND` — unknown `shippingAddressName`\n- `400 INVALID_ITEM` — product / menu / addon id not found (or id missing for that `type`)\n- `400 INVALID_VARIANT` — product has variants and `productVariantId` is missing or wrong\n- `401` / `403` from the auth middleware (`{ \"message\": ... }`)\n- `500 ORDER_CREATE_FAILED`\n\nPostman: saves `data.number` → `{{orderNumber}}` and `data.items[0].id` → `{{orderItemId}}`."
+          },
+          "response": []
+        },
+        {
+          "name": "Create a Pickup order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.number) pm.collectionVariables.set('orderNumber', json.data.number);",
+                  "if (json.data && json.data.items && json.data.items.length) pm.collectionVariables.set('orderItemId', json.data.items[0].id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"orderType\": \"pickup\",\n    \"pickupTime\": \"2026-09-24T12:30:00.000Z\",\n    \"branchId\": \"{{branchId}}\",\n    \"items\": [\n        { \"type\": \"product\", \"productId\": \"{{productId}}\", \"productVariantId\": \"{{productVariantId}}\", \"quantity\": 2 }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders"
+              ]
+            },
+            "description": "Creates a **pickup** (take-away) order. Same rules as *Create a Delivery order* for `items` and pricing — see that request for the full item table and response shape.\n\n**Auth**: Bearer — `CUSTOMER` or `CASHIER` / `WAITER` / `MANAGER` / `ADMIN`.\n\n**Body (JSON)** — `orderType: \"pickup\"`\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `orderType` | `\"pickup\"` | ✅ | |\n| `pickupTime` | ISO date-time | ✅ | when the customer will come. Send with timezone, e.g. `new Date(...).toISOString()` |\n| `branchId` | UUID | **customer: ✅** / staff: ignored | Customers choose the branch (from *Get all Branches*). For staff the branch is always **their own employee branch** |\n| `customerPhone` | E.164 | staff: optional / customer: ignored | Staff: registered customer's phone, or omit for a **walk-in** customer |\n| `items` | array (min 1) | ✅ | same as delivery |\n\n`total = subtotal` (no delivery fee). The order's `pickupOrders[0]` contains `{ id, orderNumber, pickupTime, createdAt, updatedAt }`.\n\n**201 Created** — `{ \"data\": { ...full order, \"orderType\": \"pickup\", \"pickupOrders\": [ { \"pickupTime\": \"2026-09-24T12:30:00.000Z\", \"...\": \"...\" } ], \"deliveries\": [] } }`\n\n**Errors** — `{ \"error\": { \"message\", \"code\" } }`\n- `400 VALIDATION_ERROR` (e.g. missing `pickupTime`)\n- `400 BRANCH_REQUIRED` — customer did not send `branchId` (\"Please select a branch\")\n- `400 BRANCH_NOT_FOUND`\n- `403 NO_BRANCH` — the staff member creating the order has no branch\n- `400 CUSTOMER_NOT_FOUND`, `INVALID_ITEM`, `INVALID_VARIANT`\n- `500 ORDER_CREATE_FAILED`\n\nPostman: saves `{{orderNumber}}` and `{{orderItemId}}`. This example is written for a **customer** token."
+          },
+          "response": []
+        },
+        {
+          "name": "Create a Dine-in order (POS)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.number) pm.collectionVariables.set('orderNumber', json.data.number);",
+                  "if (json.data && json.data.items && json.data.items.length) pm.collectionVariables.set('orderItemId', json.data.items[0].id);",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"orderType\": \"dineIn\",\n    \"table\": \"T12\",\n    \"items\": [\n        { \"type\": \"product\", \"productId\": \"{{productId}}\", \"productVariantId\": \"{{productVariantId}}\", \"quantity\": 1 },\n        { \"type\": \"menu\", \"menuId\": \"{{menuId}}\", \"quantity\": 1 }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders"
+              ]
+            },
+            "description": "Creates a **dine-in** order — typically from the POS or waiter tablet. Same `items` rules and response shape as *Create a Delivery order*.\n\n**Auth**: Bearer — `CASHIER` / `WAITER` / `MANAGER` / `ADMIN` (or `CUSTOMER` for table ordering from the app).\n\n**Body (JSON)** — `orderType: \"dineIn\"` (camelCase, capital I)\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `orderType` | `\"dineIn\"` | ✅ | |\n| `table` | string | ✅ | free text table label, e.g. `\"T12\"` or `\"Terrace 3\"` (no table entity yet) |\n| `branchId` | UUID | **customer: ✅** / staff: ignored | staff → their own branch is used |\n| `customerPhone` | E.164 | optional (staff) | omit for a walk-in; if sent it must be a registered customer |\n| `items` | array (min 1) | ✅ | |\n\nWho created it: if the token is a `CASHIER` the order gets `cashierEmail`; any other employee (e.g. `WAITER`) is stored as `employeeEmail`.\n\n**201 Created** — `{ \"data\": { ...full order, \"orderType\": \"dineIn\", \"customerPhone\": null, \"customer\": null, \"employeeEmail\": \"waiter@yousracompany.com\", \"dineInOrders\": [ { \"id\": \"...\", \"orderNumber\": \"...\", \"table\": \"T12\", \"createdAt\": \"...\", \"updatedAt\": \"...\" } ] } }`\n\n**Errors**\n- `400 VALIDATION_ERROR` (e.g. missing `table`)\n- `403 NO_BRANCH` — staff member not assigned to a branch\n- `400 BRANCH_REQUIRED` / `BRANCH_NOT_FOUND` (customer tokens)\n- `400 CUSTOMER_NOT_FOUND`, `INVALID_ITEM`, `INVALID_VARIANT`\n- `500 ORDER_CREATE_FAILED`\n\nPostman: saves `{{orderNumber}}` and `{{orderItemId}}`. This example uses a **staff** token and a walk-in customer, with a product line and a menu line."
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Orders (customer)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders/mine?view=current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders",
+                "mine"
+              ],
+              "query": [
+                {
+                  "value": "current",
+                  "key": "view",
+                  "description": "current (default) = in progress; history = successful / delivered / cancelled"
+                }
+              ]
+            },
+            "description": "The logged-in customer's orders, newest first (\"My orders\" screen in the customer app). **Auth: Bearer, role `CUSTOMER`.**\n\n**Query params**\n| Param | Values | Default |\n|---|---|---|\n| `view` | `current` → every status except `successful`, `delivered`, `cancelled` (orders in progress) · `history` → those three final statuses | `current` (any other value = current) |\n\nTip: poll `view=current` every 15–30 s on the order-tracking screen to follow status changes (no websockets yet).\n\n**200 OK** — `{ \"data\": [ ...full orders (see *Create a Delivery order* for the shape) ] }`\n\nStatus labels suggestion for customers: `pending` \"Received\", `kitchen`/`confirmed`/`preparing` \"Being prepared\", `ready` \"Ready for pickup\", `ready_for_delivery` \"Waiting for a driver\", `out_for_delivery` \"On the way\", `delivered`/`successful` \"Completed\", `cancelled` \"Cancelled\".\n\n**Errors**\n- `401` `{ \"message\": \"No token provided\" | \"Invalid or expired token\" }`\n- `403` `{ \"message\": \"Insufficient permissions\" }` — token is an employee's\n- `500 ORDERS_FETCH_FAILED`"
+          },
+          "response": []
+        },
+        {
+          "name": "Get my Branch's Orders (staff)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders/branch?status=pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders",
+                "branch"
+              ],
+              "query": [
+                {
+                  "description": "Optional. One order status; omit to get all orders of the branch",
+                  "key": "status",
+                  "value": "pending"
+                }
+              ]
+            },
+            "description": "All orders of the logged-in employee's **branch**, newest first. This is the feed for the POS order list, the kitchen display (KDS) and the manager dashboard. **Auth: Bearer, role `CASHIER`, `WAITER`, `KITCHEN_STAFF`, `KITCHEN_CHEF`, `MANAGER` or `ADMIN`.** The employee must be assigned to a branch.\n\n**Query params**\n| Param | Values | Default |\n|---|---|---|\n| `status` | one of `pending`, `kitchen`, `confirmed`, `preparing`, `ready`, `ready_for_delivery`, `out_for_delivery`, `successful`, `delivered`, `cancelled` | omitted = **all** orders of the branch |\n\nOnly one status per request (no comma lists). Suggested usage:\n- KDS \"new tickets\": `?status=pending` · \"in progress\": `?status=kitchen`\n- POS \"ready to hand over\": `?status=ready`\n- No pagination yet — avoid calling without `status` on a busy branch.\n\n**200 OK** — `{ \"data\": [ ...full orders (see *Create a Delivery order*) ] }`\n\n**Errors**\n- `400 VALIDATION_ERROR` — unknown status (`details: [{ \"field\": \"status\", \"message\": \"...\" }]`)\n- `400 NO_BRANCH_ASSIGNED` — the employee has no branch\n- `401 UNAUTHORIZED` — employee not found (e.g. token of a deleted account)\n- `401` / `403` from the auth middleware\n- `500 ORDERS_FETCH_FAILED`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update an Order (cashier / manager)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "value": "application/json",
+                "key": "Content-Type"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"successful\",\n    \"discount\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders/{{orderNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders",
+                "{{orderNumber}}"
+              ]
+            },
+            "description": "Updates an order: status, discount, and the type-specific details. Send only the fields you want to change. **Auth: Bearer, role `CASHIER`, `MANAGER` or `ADMIN`.**\n\n**Path params**: `number` — order number (UUID).\n\n**Body (JSON)** — all optional, but at least one is required\n| Field | Type | Applies to | Notes |\n|---|---|---|---|\n| `status` | order status enum | all | `pending, kitchen, confirmed, preparing, ready, ready_for_delivery, out_for_delivery, successful, delivered, cancelled`. ⚠️ No transition check — the server accepts any value, so the UI must only offer sensible next steps (e.g. `ready` → `successful` when the customer collects; `cancelled`) |\n| `discount` | number ≥ 0, ≤ subtotal | all | XAF amount. `total` is recomputed: `total = subtotal − discount + deliveryFee` |\n| `employeeEmail` | email | all | reassign the employee in charge |\n| `pickupTime` | ISO date-time | pickup | ignored for other types |\n| `table` | string | dineIn | move the order to another table |\n| `driverEmail` | email | delivery | assign a driver manually (instead of the driver claiming) |\n| `estimatedDeliveryTime` | ISO date-time | delivery | |\n| `actualDeliveryTime` | ISO date-time | delivery | |\n| `deliveryStatus` | `pending, assigned, in_transit, delivered, failed` | delivery | changes the **delivery** record, not the order status |\n\nFields that don't match the order's type are silently ignored.\n\n**200 OK** — `{ \"data\": { ...full updated order (see *Create a Delivery order*) } }`\n\n**Errors** — `{ \"error\": { \"message\", \"code\" } }`\n- `400 VALIDATION_ERROR` — `details: [{ \"field\", \"message\" }]`\n- `400 EMPTY_UPDATE` — no field sent\n- `400 INVALID_DISCOUNT` — discount above the subtotal\n- `404 NOT_FOUND` — order not found\n- `401` / `403` from the auth middleware\n- `500 ORDER_UPDATE_FAILED` (also: unknown `driverEmail` / `employeeEmail`)"
+          },
+          "response": []
+        },
+        {
+          "name": "Dispatch an Order to the kitchen (chef)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders/{{orderNumber}}/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders",
+                "{{orderNumber}}",
+                "dispatch"
+              ]
+            },
+            "description": "The chef sends a new order to the kitchen. **Auth: Bearer, role `KITCHEN_CHEF`, `MANAGER` or `ADMIN`.** No body.\n\nWhat it does:\n1. Only works if the order is `pending` or `confirmed` → the order becomes `kitchen`.\n2. All its `pending` items become `in_station`.\n3. Returns the order's work **grouped by kitchen station**: each product line goes to its product's station; each menu line is expanded into its products (quantity = menu qty × product qty in the menu), each routed to its own station. Addon lines are not routed to a station.\n\nEvery product involved must have a `stationId` (set via *Update a Product*), otherwise the dispatch fails with `MISSING_STATION`.\n\n**Path params**: `number` — order number (UUID).\n\n**200 OK** — ⚠️ not the full order shape, a dispatch summary:\n```json\n{\n  \"data\": {\n    \"orderNumber\": \"3f6c9d2e-8a41-4b7e-9c55-0e1d2a7b9f10\",\n    \"stations\": [\n      {\n        \"stationId\": \"s1...\",\n        \"stationName\": \"Pizza oven\",\n        \"tasks\": [\n          { \"stationId\": \"s1...\", \"stationName\": \"Pizza oven\", \"orderItemId\": \"i1...\", \"productId\": \"9e7d...\", \"productName\": \"Margherita\", \"quantity\": 1, \"source\": \"product\" },\n          { \"stationId\": \"s1...\", \"stationName\": \"Pizza oven\", \"orderItemId\": \"i3...\", \"productId\": \"9e7d...\", \"productName\": \"Margherita\", \"quantity\": 2, \"source\": \"menu\", \"menuName\": \"Duo Pizza Deal\" }\n        ]\n      },\n      {\n        \"stationId\": \"s2...\",\n        \"stationName\": \"Drinks\",\n        \"tasks\": [ { \"orderItemId\": \"i3...\", \"productName\": \"Coca-Cola 33cl\", \"quantity\": 2, \"source\": \"menu\", \"menuName\": \"Duo Pizza Deal\", \"...\": \"...\" } ]\n      }\n    ]\n  }\n}\n```\nKDS: show one column per station; each task's `orderItemId` is what you send to *Update an Order item status*. Several tasks can share the same `orderItemId` (a menu line split across stations).\n\n**Errors** — `{ \"error\": { \"message\", \"code\" } }`\n- `404 NOT_FOUND` — order not found\n- `409 INVALID_STATUS` — order is not `pending`/`confirmed` (already dispatched, ready, cancelled…)\n- `400 MISSING_STATION` — e.g. `Product \"Margherita\" has no station assigned`\n- `401` / `403` from the auth middleware\n- `500 DISPATCH_FAILED`"
+          },
+          "response": []
+        },
+        {
+          "name": "Update an Order item status (kitchen)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"ready\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders/items/{{orderItemId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders",
+                "items",
+                "{{orderItemId}}",
+                "status"
+              ]
+            },
+            "description": "Kitchen staff update one order line (from the KDS). **Auth: Bearer, role `KITCHEN_STAFF` or `KITCHEN_CHEF`.**\n\n**Path params**: `itemId` — the order item `id` (`items[].id` in the order, or `tasks[].orderItemId` from *Dispatch*).\n\n**Body (JSON)**\n| Field | Type | Required | Values |\n|---|---|---|---|\n| `status` | enum | ✅ | `pending`, `preparing`, `in_station`, `out_of_station`, `ready`, `complete` |\n\n**Automatic order promotion**: when **every** line of the order is `ready` or `complete`, the order moves to `ready` (pickup / dine-in) or `ready_for_delivery` (delivery) — only if it is still `pending`, `confirmed`, `kitchen` or `preparing`.\n\n⚠️ This includes **addon lines** (`type: \"addons\"`): they are not listed per station by *Dispatch*, but they must be marked `ready` too or the order never becomes ready. Suggestion: show addons under their product on the KDS and mark them together.\n\n**200 OK** — `{ \"data\": { ...full order (see *Create a Delivery order*) } }` — check `data.status` to know whether the order was promoted.\n\n**Errors** — `{ \"error\": { \"message\", \"code\" } }`\n- `400 VALIDATION_ERROR` — invalid status\n- `404 NOT_FOUND` — \"Item not found\"\n- `401` / `403` from the auth middleware\n- `500 ITEM_UPDATE_FAILED`"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Orders (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"numbers\": [\n        \"{{orderNumber}}\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "orders"
+              ]
+            },
+            "description": "⚠️ **Dangerous — permanent delete.** Deletes one or more orders together with their items, pickup/dine-in/delivery records and payments (cascade). **Auth: Bearer, role `ADMIN` only.** For normal cancellations use *Update an Order* with `status: \"cancelled\"` instead — never expose this in the POS.\n\n**Body (JSON)**\n| Field | Type | Required |\n|---|---|---|\n| `numbers` | array of order numbers (min 1) | ✅ |\n\n⚠️ Axios: `axios.delete(url, { data: { numbers: [...] } })`.\n\n**200 OK**\n```json\n{ \"data\": { \"message\": \"2 order(s) deleted\", \"deleted\": [\"3f6c9d2e-...\", \"7a1b...\"] } }\n```\nNote: `deleted` echoes the numbers you **sent**, not only the ones that existed — use the count in `message`.\n\n**Errors** — `{ \"error\": { \"message\", \"code\" } }`\n- `400 VALIDATION_ERROR` — missing or empty `numbers`\n- `404 NOT_FOUND` — none of the numbers exist\n- `401` / `403` from the auth middleware\n- `500 ORDER_DELETE_FAILED`"
+          },
+          "response": []
+        }
+      ],
+      "description": "Order lifecycle for the customer app, the POS, the kitchen display (KDS) and the manager dashboard. Base path: `/api/v2/orders`. Every route requires a Bearer token; allowed roles are listed on each request. Read **Create a Delivery order** first: it contains the module overview, the full item rules and the full order response shape used by all the other order endpoints.\n\nTypical flow: create (`pending`) → chef dispatches (`kitchen`) → kitchen marks every item `ready` → order auto-promoted to `ready` / `ready_for_delivery` → driver claims and picks up (`out_for_delivery`) → `delivered`; pickup/dine-in are closed by the cashier with `successful`."
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "prodBaseUrl",
+      "value": "https://backend.pizzaland.cm"
+    },
+    {
+      "key": "authToken",
+      "value": ""
+    },
+    {
+      "key": "verificationToken",
+      "value": ""
+    },
+    {
+      "key": "customerPhone",
+      "value": "+237696000002"
+    },
+    {
+      "key": "employeeEmail",
+      "value": "marcelineabadeer@vampirequeen.com"
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "subCategoryId",
+      "value": ""
+    },
+    {
+      "key": "productId",
+      "value": ""
+    },
+    {
+      "key": "addonId",
+      "value": ""
+    },
+    {
+      "key": "branchId",
+      "value": ""
+    },
+    {
+      "key": "shippingAddressName",
+      "value": "Bonamoussadi Carrefour"
+    },
+    {
+      "key": "deliveryId",
+      "value": ""
+    },
+    {
+      "key": "productVariantId",
+      "value": ""
+    },
+    {
+      "key": "menuId",
+      "value": ""
+    },
+    {
+      "key": "orderNumber",
+      "value": ""
+    },
+    {
+      "key": "orderItemId",
+      "value": ""
+    }
+  ]
+}
