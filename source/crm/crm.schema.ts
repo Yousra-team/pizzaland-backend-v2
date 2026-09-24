@@ -16,24 +16,23 @@ export const PREFERENCE_NAMES = [
 
 
 
+// `verified` is not here on purpose: only the server decides if a customer is verified
 export const customerSchema = z.object({
   firstName: z.string().min(1, { message: 'First name is required' }),
-  lastName: z.string().min(1, { message: 'Last name is required' }),
-  email: z.email({ message: 'Invalid email address' }),
-  gender: z.enum(['male', 'female', 'other']),
-  dateOfBirth: z.date().optional(),
-  verified: z.boolean().default(false),
+  lastName: z.string().min(1).optional(),
+  email: z.email({ message: 'Invalid email address' }).optional(),
+  gender: z.enum(['Male', 'Female', 'Other']).optional(), // must match the Prisma Gender enum
+  dateOfBirth: z.coerce.date().optional(), // JSON sends dates as strings, coerce turns them into Date
 });
 
+// customerPhone is never in these schemas: it comes from the logged-in user's token
 export const favoriteSchema = z.object({
-  customerPhone: z.e164(),
   productId: z.string(),
 });
 
 export const reviewSchema = z.object({
-  customerPhone: z.e164(),
   productId: z.string(),
-  rating: z.number().min(1).max(5),
+  rating: z.coerce.number().int().min(1).max(5), // rating is an Int column, so 4.5 is rejected
   comment: z.string().optional(),
 });
 
@@ -43,9 +42,14 @@ export const accountSchema = z.object({
   password: z.string().min(4).max(20),
 });
 
-export const userPreferenceSchema = z.object({
+// Used by credit/debit: amount must be strictly positive
+export const accountMovementSchema = z.object({
   customerPhone: z.e164(),
-  employeeEmail: z.email(),
+  amount: z.number().positive(),
+});
+
+// The owner (customer or employee) comes from the token, so only name and value are sent
+export const userPreferenceSchema = z.object({
   name: z.enum(PREFERENCE_NAMES, { message: 'Invalid preference name' }),
   value: z.string().min(1, { message: 'Preference value is required' }),
-}); 
+});

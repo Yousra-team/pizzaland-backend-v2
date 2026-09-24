@@ -1,143 +1,168 @@
-import { customerSchema , reviewSchema , favoriteSchema , accountSchema , userPreferenceSchema } from "./crm.schema";
+import { reviewSchema , favoriteSchema , userPreferenceSchema } from "./crm.schema";
 import * as z from "zod";
 import { Request, Response } from "express";
 import { prisma } from '../lib/prisma';
 
-// CREATE SECTION 
+// All handlers below run after authMiddleware, so req.user is set.
+// For customers, req.user.userId is their phone number (see authentication.ts).
 
-// Add a favorite product for a customer
+// CREATE SECTION
 
+// Add a favorite product for the logged-in customer
 export const addFavorite = async (req: Request, res: Response): Promise<void> => {
+    const customerPhone = req.user!.userId;
     const result = favoriteSchema.safeParse(req.body);
     if (!result.success) {
-        res.status(400).json({ error: result.error });
+        res.status(400).json({ error: { message: "Invalid favorite data", details: z.flattenError(result.error).fieldErrors } });
         return;
     }
 
     try {
-        const favorite = await prisma.favorites.create({
-            data: result.data
+        // No unique constraint on (customerPhone, productId), so check to avoid duplicates
+        const existing = await prisma.favorites.findFirst({
+            where: { customerPhone, productId: result.data.productId }
         });
-        res.status(201).json(favorite);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to add favorite product' });
+        if (existing) {
+            res.status(200).json({ data: existing });
+            return;
+        }
+
+        const favorite = await prisma.favorites.create({
+            data: { ...result.data, customerPhone }
+        });
+        res.status(201).json({ data: favorite });
+    } catch (error: any) {
+        console.error("addFavorite failed:", error);
+        if (error.code === "P2003") {
+            res.status(404).json({ error: { message: "Product not found", code: "NOT_FOUND" } });
+            return;
+        }
+        res.status(500).json({ error: { message: "Failed to add favorite product" } });
     }
-}
+};
 
-// Add a review for a product by a customer
-
+// Add a review for a product by the logged-in customer
 export const addReview = async (req: Request, res: Response): Promise<void> => {
+    const customerPhone = req.user!.userId;
     const result = reviewSchema.safeParse(req.body);
     if (!result.success) {
-        res.status(400).json({ error: result.error });
+        res.status(400).json({ error: { message: "Invalid review data", details: z.flattenError(result.error).fieldErrors } });
         return;
     }
 
     try {
         const review = await prisma.reviews.create({
-            data: result.data
+            data: { ...result.data, customerPhone }
         });
-        res.status(201).json(review);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to add review' });
+        res.status(201).json({ data: review });
+    } catch (error: any) {
+        console.error("addReview failed:", error);
+        if (error.code === "P2003") {
+            res.status(404).json({ error: { message: "Product not found", code: "NOT_FOUND" } });
+            return;
+        }
+        res.status(500).json({ error: { message: "Failed to add review" } });
     }
 };
 
-// Add a user preference for a customer
-
+// Set a preference for the logged-in user (customer or employee).
+// Each user has at most one value per preference name, so an existing one is updated.
 export const addUserPreference = async (req: Request, res: Response): Promise<void> => {
     const result = userPreferenceSchema.safeParse(req.body);
     if (!result.success) {
-        res.status(400).json({ error: result.error });
+        res.status(400).json({ error: { message: "Invalid preference data", details: z.flattenError(result.error).fieldErrors } });
         return;
     }
 
+    const owner = req.user!.role === "CUSTOMER"
+        ? { customerPhone: req.user!.userId }
+        : { employeeEmail: req.user!.userId };
+
     try {
-        const userPreference = await prisma.userPreferences.create({
-            data: result.data
+        const existing = await prisma.userPreferences.findFirst({
+            where: { ...owner, name: result.data.name }
         });
-        res.status(201).json(userPreference);
+
+        if (existing) {
+            const userPreference = await prisma.userPreferences.update({
+                where: { id: existing.id },
+                data: { value: result.data.value }
+            });
+            res.status(200).json({ data: userPreference });
+            return;
+        }
+
+        const userPreference = await prisma.userPreferences.create({
+            data: { ...result.data, ...owner }
+        });
+        res.status(201).json({ data: userPreference });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to add user preference' });
+        console.error("addUserPreference failed:", error);
+        res.status(500).json({ error: { message: "Failed to save user preference" } });
     }
 };
 
 // GET SECTION
 
-// Get all reviews for a specific product
-
+// Get all reviews for a specific product (public)
 export const getReviewsByProductId = async (req: Request, res: Response): Promise<void> => {
-    const productId: string[] = req.body.productId;
-    const created : object[] = [];
+    const productId = req.params.productId as string;
     try {
-        for (const id of productId) {
-           const reviews = await prisma.reviews.findMany({
-            where: { productId: id },
-            include: { customer: true }
+        const reviews = await prisma.reviews.findMany({
+            where: { productId },
+            // only the reviewer's name: this route is public, so no phone/email/date of birth
+            include: { customer: { select: { firstName: true, lastName: true } } },
+            orderBy: { createdAt: "desc" }
         });
-            created.push(reviews);
-        }
-       
-        res.status(200).json(created);
+        res.status(200).json({ data: reviews });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch reviews' });
+        console.error("getReviewsByProductId failed:", error);
+        res.status(500).json({ error: { message: "Failed to fetch reviews" } });
     }
 };
 
-// Get all reviews by a specific customer
+// Get all reviews written by the logged-in customer
 export const getReviewsByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user?.userId
+    const customerPhone = req.user!.userId;
     try {
-         if(!customerPhone) {
-            res.status(403).json({message: "Login First Bitch!"})
-         };
-
-         const reviews = prisma.reviews.findMany({
-            where: {customerPhone}
-         });
-         res.status(200).json(reviews)
-
-    }catch(error){
-       res.status(500).json({ error: 'Failed to fetch reviews' }); 
-    };
-};
-
-
-// Get all favorites for a specific customer
-export const getFavoritesByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user?.userId
-    try {
-          if (!customerPhone) {
-        res.status(403).json({message: "Login First Bitch!"})
-     };
-
-     const favorites = await prisma.favorites.findMany({
-        where: {customerPhone},
-        include: {product: true}
-     });
-
-     res.status(200).json(favorites)
+        const reviews = await prisma.reviews.findMany({
+            where: { customerPhone },
+            orderBy: { createdAt: "desc" }
+        });
+        res.status(200).json({ data: reviews });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch favorites' });
+        console.error("getReviewsByCustomerPhone failed:", error);
+        res.status(500).json({ error: { message: "Failed to fetch reviews" } });
     }
 };
 
-// Get all user preferences for a specific customer
-export const getUserPreferences = async (req: Request, res: Response): Promise<void> => {
+// Get all favorites of the logged-in customer
+export const getFavoritesByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
+    const customerPhone = req.user!.userId;
     try {
-     const customerPhone = req.user?.userId;
-
-     if (!customerPhone) {
-        res.status(403).json({message: "Login First Bitch!"})
-     };
-
-     const userPreferences = await prisma.userPreferences.findMany({
-        where: {customerPhone}
-     });
-
-     res.status(200).json(userPreferences)
-    } catch(error) {
-        res.status(500).json
-    };
+        const favorites = await prisma.favorites.findMany({
+            where: { customerPhone },
+            include: { product: true }
+        });
+        res.status(200).json({ data: favorites });
+    } catch (error) {
+        console.error("getFavoritesByCustomerPhone failed:", error);
+        res.status(500).json({ error: { message: "Failed to fetch favorites" } });
+    }
 };
-// Remember to JWT authmiddleware for all the above routes to ensure that only authenticated users can access them.
+
+// Get all preferences of the logged-in user (customer or employee)
+export const getUserPreferences = async (req: Request, res: Response): Promise<void> => {
+    const owner = req.user!.role === "CUSTOMER"
+        ? { customerPhone: req.user!.userId }
+        : { employeeEmail: req.user!.userId };
+    try {
+        const userPreferences = await prisma.userPreferences.findMany({
+            where: owner
+        });
+        res.status(200).json({ data: userPreferences });
+    } catch (error) {
+        console.error("getUserPreferences failed:", error);
+        res.status(500).json({ error: { message: "Failed to fetch user preferences" } });
+    }
+};

@@ -318,17 +318,17 @@ model Category {
 }
 
 model SubCategory {
-  id            String     @id @default(uuid())
-  name          String
-  description   String
-  imageUrl      String?    @map("Image URL")
-  imagePath     String?    @map("Image PATH")
-  categoryId    String     @map("CATEGORY ID")
-  category      Category   @relation(fields: [categoryId], references: [id])
-  products      Products[]
-  menus         Menu[]
-  createdAt     DateTime   @default(now()) @map("CREATED AT")
-  updatedAt     DateTime   @updatedAt @map("UPDATED AT")
+  id          String     @id @default(uuid())
+  name        String
+  description String
+  imageUrl    String?    @map("Image URL")
+  imagePath   String?    @map("Image PATH")
+  categoryId  String     @map("CATEGORY ID")
+  category    Category   @relation(fields: [categoryId], references: [id])
+  products    Products[]
+  menus       Menu[]
+  createdAt   DateTime   @default(now()) @map("CREATED AT")
+  updatedAt   DateTime   @updatedAt @map("UPDATED AT")
 
   @@map("sub_categories")
 }
@@ -383,16 +383,16 @@ model Menu {
   description     String
   price           Float
   category        Category     @relation(fields: [categoryId], references: [id])
-  categoryId      String       @map("category_id")
+  categoryId      String       @map("CATEGORY ID")
   subcategory     SubCategory  @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String       @map("sub_category_id")
-  imageUrl        String       @map("image_url")
-  imagePublicId   String       @map("image_public_id")
-  preparationTime Int?         @map("preparation_time")
+  subCategoryId   String       @map("SUB CATEGORY ID")
+  imageUrl        String?      @map("Image URL")
+  imagePath       String?      @map("Image Path")
+  preparationTime Int?         @map("Preparation Time min")
   items           MenuItems[]
   orderItems      OrderItems[]
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
+  createdAt       DateTime     @default(now()) @map("CREATED AT")
+  updatedAt       DateTime     @updatedAt @map("UPDATED AT")
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -406,11 +406,11 @@ model ProductVariants {
   product    Products     @relation(fields: [productId], references: [id])
   productId  String       @map("product_id")
   orderItems OrderItems[]
-  createdAt  DateTime     @default(now()) @map("created_at")
-  updatedAt  DateTime     @updatedAt @map("updated_at")
+  createdAt  DateTime     @default(now()) @map("CREATED AT")
+  updatedAt  DateTime     @updatedAt @map("UPDATED AT")
 
   @@index([productId])
-  @@map("product_variants")
+  @@map("Product Variants")
 }
 
 model MenuItems {

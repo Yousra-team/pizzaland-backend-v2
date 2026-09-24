@@ -6,19 +6,16 @@ export const ProductSchema = z.object({
     categoryId: z.string(),
     subCategoryId: z.string().optional(),
     stationId : z.string().optional(),
-    price : z.number(),
-    imageUrl : z.string().optional(),
-    imagePublicId : z.string().optional(),
-    popularity: z.number().optional(),
-    preparationTime : z.number().optional(),
-
+    price : z.coerce.number().positive(),
+    popularity: z.coerce.number().int().optional(),
+    preparationTime : z.coerce.number().int().optional(),
 });
 
 export const AddonSchema = z.object({
    id: z.string().optional(),
    name : z.string(),
    description : z.string(),
-   price : z.number(),
+   price : z.coerce.number(),
 });
 
 export const ProductVariantSchema = z.object({
@@ -29,15 +26,11 @@ export const ProductVariantSchema = z.object({
 export const CategorySchema = z.object({
     name : z.string(),
     description : z.string(),
-    imageUrl : z.string().optional(),
-    imagePublicId : z.string().optional(),
 });
 
 export const SubCategorySchema = z.object({
     name : z.string(),
     description : z.string(),
-    imageUrl : z.string().optional(),
-    imagePublicId : z.string().optional(),
     categoryId: z.string(),
 });
 
@@ -48,23 +41,21 @@ export const ManyProductSchema = z.array(
     categoryId: z.string(),
     subCategoryId: z.string().optional(),
     stationId : z.string().optional(),
-    price : z.number(),
-    imageUrl : z.string().optional(),
-    imagePublicId : z.string().optional(),
-    popularity: z.number().optional(),
-    preparationTime : z.number().optional(),
+    price : z.coerce.number().positive(),
+    popularity: z.coerce.number().int().optional(),
+    preparationTime : z.coerce.number().optional(),
     addons : z.array(
         z.object({
              id: z.string().optional(),
             name : z.string(),
             description : z.string(),
-            price : z.number(),
+            price : z.coerce.number(),
         })
     ).optional(),
     variants: z.array(
         z.object({
          name : z.string(),
-         price : z.number(),   
+         price : z.coerce.number(),   
         })
     ).optional(),
     })
@@ -74,15 +65,13 @@ export const ManyProductSchema = z.array(
 export const MenuSchema = z.object({
   name: z.string(),
   description: z.string(),
-  price: z.number(),
+  price: z.coerce.number().positive(),
   categoryId: z.string(),
-  subCategoryId: z.string(),      // was "subcategoryId" — Prisma model uses capital C
-  imageUrl: z.string(),
-  imagePublicId: z.string(),      // was missing entirely — required on the model
-  preparationTime: z.number().optional(), // Prisma has it as Int? (optional)
+  subCategoryId: z.string(),      // was "subcategoryId" — Prisma model uses capital C   // was missing entirely — required on the model
+  preparationTime: z.coerce.number().int().optional(), // Prisma has it as Int? (optional)
   MenuItems: z.array(z.object({
     productId: z.string(),
-    quantity: z.number(),
+    quantity: z.coerce.number(),
   }))
 });
 // A menu needs an Addons*

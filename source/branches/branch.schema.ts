@@ -14,7 +14,7 @@ export const shippingAddressSchema = z.object({
     region: z.string(),
     city: z.string(),
     neighborhood: z.string(),
-    deliveryFee: z.number(),
-    deliveryTime: z.number(),
+    deliveryFee: z.number().nonnegative(),
+    deliveryTime: z.number().int().nonnegative(),
     branchId: z.string(),
 }); 

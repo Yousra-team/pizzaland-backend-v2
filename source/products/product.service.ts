@@ -2,6 +2,7 @@ import { ProductSchema, AddonSchema , ProductVariantSchema , CategorySchema , Su
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
+import { uploadImage, deleteImage } from '../utilities/storage.service';
 
 
 // CREATE ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES
@@ -9,6 +10,9 @@ import { z } from 'zod';
 //CREATE PRODUCT ENDPOINT
 
 export const createProduct = async (req: Request, res: Response) => {
+      let uploadedPath: string | null = null;
+
+
     const result = ProductSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -16,6 +20,12 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 
     const productData = result.data;
+
+     // ── Image ────────────────────────────────────────────────────────────
+    if (!req.file) {
+        return res.status(400).json({ error: { message: "Image file is required" } });
+    }
+
 
     // addons are optional — some reference existing addons (by id), others are created inline
     type AddonInput = z.infer<typeof AddonSchema>; // "one item from the addons array"
@@ -45,9 +55,15 @@ export const createProduct = async (req: Request, res: Response) => {
       }
 
     try {
+       // 1. Upload the image to Supabase
+        const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "Products");
+        uploadedPath = uploaded.path;
+
         const newProduct = await prisma.products.create({
             data: {
                 ...productData,
+                imageUrl: uploaded.url,
+                imagePath: uploaded.path,
                 addons: {
                     connect: existingAddonIds.map((id) => ({ id })),
                     create: newAddonsData,
@@ -61,6 +77,14 @@ export const createProduct = async (req: Request, res: Response) => {
 
         res.status(201).json({ data: newProduct, meta: null });
     } catch (error) {
+         // 3. If the DB failed after the upload succeeded, delete the orphan file
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
         console.error("Error creating product:", error);
         res.status(500).json({ error: { message: "Failed to create product" } });
     }
@@ -119,6 +143,8 @@ export const createManyProducts = async (req: Request, res: Response) => {
 
 // MENU SECTION : Create Menu
 export const makeMenu = async (req: Request, res: Response) => {
+   let uploadedPath: string | null = null;
+
     const result = MenuSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -127,10 +153,19 @@ export const makeMenu = async (req: Request, res: Response) => {
 
     const { MenuItems, ...menuData } = result.data;
 
+    if (!req.file) {
+        return res.status(400).json({ error: { message: "Image file is required" } });
+    }
+
     try {
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Menus")
+        uploadedPath = uploaded.path;
+
         const newMenu = await prisma.menu.create({
             data: {
                 ...menuData,
+                imageUrl: uploaded.url,
+                imagePath: uploaded.path,
                 items: {
                     create: MenuItems.map(({ productId, quantity }) => ({
                         quantity,
@@ -144,6 +179,17 @@ export const makeMenu = async (req: Request, res: Response) => {
         res.status(201).json({ data: newMenu, meta: null });
     } catch (error) {
         console.error("Error creating menu:", error);
+
+           // 3. If the DB failed after the upload succeeded, delete the orphan file
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
+
         res.status(500).json({ error: { message: "Failed to create menu" } });
     }
 };
@@ -193,20 +239,44 @@ export const makeManyMenus = async (req: Request, res: Response) => {
 // ADDON SECTION : Create  Addons
 
 export const createAddon = async (req: Request, res: Response) => {
+    let uploadedPath: string | null = null;
     const result = AddonSchema.safeParse(req.body);
 
     if (!result.success) {
         return res.status(400).json({ error: { message: 'Invalid addon data', details: result.error } });
     }
+    
+    if (!req.file) {
+        return res.status(400).json({ error: { message: "Image file is required" } });
+    }
 
     try {
+
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Addons")
+        uploadedPath = uploaded.path
+
+        const addon = result.data
+
         const newAddon = await prisma.addons.create({
-            data: result.data,
+            data: {
+                imagePath : uploaded.path,
+                imageUrl: uploaded.url,
+                ...addon
+            }
         });
         res.status(201).json({ data: newAddon, meta: null });
     }
     catch (error) {
         console.error("Error creating addon:", error);
+           // 3. If the DB failed after the upload succeeded, delete the orphan file
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
         res.status(500).json({ error: { message: "Failed to create addon" } });
     }       
 };
@@ -235,18 +305,42 @@ export const createManyAddons = async (req: Request, res: Response) => {
 export const createCategory = async (req: Request, res: Response) => { 
     // Data validation using Zod SafeParsing
      const result = CategorySchema.safeParse(req.body);
+     let uploadedPath : string | null = null;
      
      if (!result.success) {
         return res.status(400).json({ error: { message: 'Invalid product data', details: result.error } });
     }
 
+     if (!req.file) {
+        return res.status(400).json({ error: { message: "Image file is required" } });
+    };
+
     try {
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Categories")
+        uploadedPath = uploaded.path
+
+        const category = result.data
+
         const newCategory = await prisma.category.create({
-            data: result.data,
+            data: {
+                imagePath: uploaded.path,
+                imageUrl: uploaded.url,
+                ...category
+            }
         });
         res.status(201).json({ data: newCategory, meta: null });
     } catch(error) {
       console.error("Error Creating a Category");
+      
+        // 3. If the DB failed after the upload succeeded, delete the orphan file
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
       res.status(500).json({error: {message: "Failed to create category"}})
 
     }
@@ -275,17 +369,41 @@ export const createManyCategories = async (req: Request, res: Response) => {
 export const createSubCategory = async (req: Request, res: Response) => { 
     // Data validation using Zod SafeParsing
      const result = SubCategorySchema.safeParse(req.body);
+     let uploadedPath : string | null = null;
      
      if (!result.success) {
         return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
     }
 
+     if (!req.file) {
+        return res.status(400).json({ error: { message: "Image file is required" } });
+    };
+
     try {
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "SubCategories")
+        uploadedPath = uploaded.path
+
+        const subcategory = result.data
+
         const newSubCategory = await prisma.subCategory.create({
-            data: result.data,
+            data: {
+                imagePath: uploaded.path,
+                imageUrl: uploaded.url,
+                ...subcategory
+            }
         });
         res.status(201).json({ data: newSubCategory, meta: null });
     } catch(error) {
+     
+       // 3. If the DB failed after the upload succeeded, delete the orphan file
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
       console.error("Error Creating a SubCategory");
       res.status(500).json({error: {message: "Failed to create subcategory"}})
 
@@ -372,7 +490,12 @@ export const getCategoryById = async (req: Request, res: Response) => {
             where: {id},
             include: {products: true , subcategories : true}
         })
-        res.status(200).json({data: category , meta: "Product Categories"})
+
+        if (!category) {
+            return res.status(404).json({ error: { message: "Category not found" } });
+        }
+
+        res.status(200).json({data: category , meta: null})
 
    } catch(error){
        console.error("Error fetching category:", error);
@@ -398,6 +521,11 @@ export const getSubCategoryById = async (req: Request , res: Response) => {
             where: {id},
             include: {products : true } // I want to see if I can include addons and variants from here
         })
+
+        if (!subcategory) {
+            return res.status(404).json({ error: { message: "Subcategory not found" } });
+        }
+
         res.status(200).json({ data: subcategory , meta: null })
     } catch (error) {
         console.error("Error fetching subcategories:", error);
@@ -425,6 +553,11 @@ export const getAddonById = async (req: Request, res: Response) => {
         const addons = await prisma.addons.findUnique({
             where: {id},
         });
+
+        if (!addons) {
+            return res.status(404).json({ error: { message: "Addon not found" } });
+        }
+
         res.status(200).json({ data: addons, meta: null });
     }
     catch (error) {
@@ -437,33 +570,72 @@ export const getAddonById = async (req: Request, res: Response) => {
 
 // Update Product by ID
 export const updateProductById = async (req: Request, res: Response) => {
+    let uploadedPath: string | null = null;
+
     const id = req.params.id as string;
     const UpdatableProductFields = ProductSchema.omit({
-    categoryId: true,
-    subCategoryId: true,
-   }).partial();
+        categoryId: true,
+        subCategoryId: true,
+    }).partial();
 
-      const result = UpdatableProductFields.safeParse(req.body);
+    const result = UpdatableProductFields.safeParse(req.body);
     if (!result.success) {
         return res.status(400).json({ error: { message: 'Invalid product data', details: result.error } });
     }
 
     try {
+        // 1. Find the existing product (we need its old image path)
+        const existing = await prisma.products.findUnique({ where: { id } });
+
+        if (!existing) {
+            return res.status(404).json({ error: { message: "Product not found" } });
+        }
+
+        // 2. Upload new image only if one was sent
+        let imageData = {};
+
+        if (req.file) {
+            const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "products");
+            uploadedPath = uploaded.path;
+            imageData = { imageUrl: uploaded.url, imagePath: uploaded.path };
+        }
+
+        // 3. Update the product
         const updatedProduct = await prisma.products.update({
             where: { id },
-            data: result.data,
+            data: { ...result.data, ...imageData },
             include: { addons: true, variants: true },
         });
+
+        // 4. DB succeeded → delete the OLD image (if it was replaced)
+        if (req.file && existing.imagePath) {
+            try {
+                await deleteImage(existing.imagePath);
+            } catch (cleanupError) {
+                console.error("Failed to delete old image:", existing.imagePath, cleanupError);
+            }
+        }
 
         res.status(200).json({ data: updatedProduct, meta: null });
     } catch (error) {
         console.error("Error updating product:", error);
+
+        // 5. DB failed → delete the NEW image (the old one is still in use)
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
         res.status(500).json({ error: { message: "Failed to update product" } });
     }
 };
-
 // Update Category by ID
 export const updateCategoryById = async (req: Request, res: Response) => {
+    let uploadedPath: string | null = null;
+
     const id = req.params.id as string;
     const UpdatableCategoryFields = CategorySchema.partial();
 
@@ -473,22 +645,55 @@ export const updateCategoryById = async (req: Request, res: Response) => {
     }
 
     try {
+        const existing = await prisma.category.findUnique({ where: { id } });
+
+        if (!existing) {
+            return res.status(404).json({ error: { message: "Category not found" } });
+        }
+
+        let imageData = {};
+
+        if (req.file) {
+            const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "categories");
+            uploadedPath = uploaded.path;
+            imageData = { imageUrl: uploaded.url, imagePath: uploaded.path };
+        }
+
         const updatedCategory = await prisma.category.update({
             where: { id },
-            data: result.data
+            data: { ...result.data, ...imageData },
         });
+
+        if (req.file && existing.imagePath) {
+            try {
+                await deleteImage(existing.imagePath);
+            } catch (cleanupError) {
+                console.error("Failed to delete old image:", existing.imagePath, cleanupError);
+            }
+        }
 
         res.status(200).json({ data: updatedCategory, meta: null });
     } catch (error) {
         console.error("Error updating category:", error);
+
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
         res.status(500).json({ error: { message: "Failed to update category" } });
     }
 };
 
 // Update Subcategory by ID
 export const updateSubcategoryById = async (req: Request, res: Response) => {
+    let uploadedPath: string | null = null;
+
     const id = req.params.id as string;
-    const UpdatableSubcategoryFields = SubCategorySchema.omit({}).partial();
+    const UpdatableSubcategoryFields = SubCategorySchema.omit({ categoryId: true }).partial();
 
     const result = UpdatableSubcategoryFields.safeParse(req.body);
     if (!result.success) {
@@ -496,40 +701,102 @@ export const updateSubcategoryById = async (req: Request, res: Response) => {
     }
 
     try {
+        const existing = await prisma.subCategory.findUnique({ where: { id } });
+
+        if (!existing) {
+            return res.status(404).json({ error: { message: "Subcategory not found" } });
+        }
+
+        let imageData = {};
+
+        if (req.file) {
+            const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "subcategories");
+            uploadedPath = uploaded.path;
+            imageData = { imageUrl: uploaded.url, imagePath: uploaded.path };
+        }
+
         const updatedSubcategory = await prisma.subCategory.update({
             where: { id },
-            data: result.data
+            data: { ...result.data, ...imageData },
         });
+
+        if (req.file && existing.imagePath) {
+            try {
+                await deleteImage(existing.imagePath);
+            } catch (cleanupError) {
+                console.error("Failed to delete old image:", existing.imagePath, cleanupError);
+            }
+        }
 
         res.status(200).json({ data: updatedSubcategory, meta: null });
     } catch (error) {
         console.error("Error updating subcategory:", error);
+
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
         res.status(500).json({ error: { message: "Failed to update subcategory" } });
     }
 };
 
-
 // Update Addons by ID
 export const updateAddonsById = async (req: Request, res: Response) => {
+    let uploadedPath: string | null = null;
+
     const id = req.params.id as string;
-    const UpdatableAddonsFields = AddonSchema.omit({}).partial();
+    const UpdatableAddonsFields = AddonSchema.omit({ id: true }).partial();
 
     const result = UpdatableAddonsFields.safeParse(req.body);
     if (!result.success) {
-        return res.status(400).json({ error: { message: 'Invalid subcategory data', details: result.error } });
+        return res.status(400).json({ error: { message: 'Invalid addon data', details: result.error } });
     }
 
     try {
-        const updatedAddons = await prisma.subCategory.update({
+        const existing = await prisma.addons.findUnique({ where: { id } });
+
+        if (!existing) {
+            return res.status(404).json({ error: { message: "Addon not found" } });
+        }
+
+        let imageData = {};
+
+        if (req.file) {
+            const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "addons");
+            uploadedPath = uploaded.path;
+            imageData = { imageUrl: uploaded.url, imagePath: uploaded.path };
+        }
+
+        const updatedAddon = await prisma.addons.update({
             where: { id },
-            data: result.data
+            data: { ...result.data, ...imageData },
         });
 
-        res.status(200).json({ data: updatedAddons, meta: null });
+        if (req.file && existing.imagePath) {
+            try {
+                await deleteImage(existing.imagePath);
+            } catch (cleanupError) {
+                console.error("Failed to delete old image:", existing.imagePath, cleanupError);
+            }
+        }
+
+        res.status(200).json({ data: updatedAddon, meta: null });
     } catch (error) {
-        console.error("Error updating Addons:", error);
+        console.error("Error updating Addon:", error);
+
+        if (uploadedPath) {
+            try {
+                await deleteImage(uploadedPath);
+            } catch (cleanupError) {
+                console.error("Failed to clean up image:", uploadedPath, cleanupError);
+            }
+        }
+
         res.status(500).json({ error: { message: "Failed to update Addon" } });
     }
 };
 
-// Add a property of Hidden to Products , Categories , Items , Addons etc
