@@ -5,6 +5,7 @@ import branchRoutes from './branches/branchRouter';
 import deliveryRoutes from './delivery/deliveryRouter';
 import authRouter from './authentication/authenticationRouter'
 import crmRoutes from './crm/crmRouter';
+import orderRoutes from './orders/ordersRouter';
 import errorMiddleware from './middlewares/error.middleware';
 
 const app = express();
@@ -20,6 +21,7 @@ app.use("/api/v2/branches", branchRoutes);
 app.use("/api/v2/deliveries", deliveryRoutes);
 app.use("/api/v2/auth",  authRouter);
 app.use("/api/v2/crm", crmRoutes);
+app.use("/api/v2/orders", orderRoutes);
 
 app.use("/", (req, res) => {
     res.send("Welcome to Pizzaland API , Made with ❤️ by Yousra");

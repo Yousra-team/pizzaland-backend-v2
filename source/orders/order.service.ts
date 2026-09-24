@@ -3,6 +3,19 @@ import { prisma } from "../lib/prisma";
 import { Request, Response } from "express";
 import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema";
 import { fullOrderInclude } from "./order.include";
+
+// An error we throw on purpose (bad input, wrong order state), carrying the HTTP status
+// and code to answer with. Anything else that fails is a real 500.
+class OrderError extends Error {
+    status: number;
+    code: string;
+    constructor(message: string, status: number, code: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+    }
+}
+
 // CREATE ENDPOINTS
 
 // MAIN FUNCTION TO CREATE AN ENDPOINT
@@ -24,37 +37,75 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
     }
 
     const data = result.data;
+    const user = req.user!;
+    const isCustomer = user.role === "CUSTOMER";
 
     try {
         const order = await prisma.$transaction(async (tx) => {
 
-             // ── Derive branchId based on order type ──
+            // ── 2. Who is the customer? ──
+            // Customers order for themselves (phone from the token). Staff enter the
+            // customer's phone, or leave it out for a walk-in customer.
+            const customerPhone = isCustomer ? user.userId : data.customerPhone;
+
+            if (!customerPhone && data.orderType === "delivery") {
+                throw new OrderError("A customer phone is required for delivery orders", 400, "CUSTOMER_REQUIRED");
+            }
+            if (!isCustomer && customerPhone) {
+                const customer = await tx.customers.findUnique({
+                    where: { phone: customerPhone },
+                    select: { phone: true },
+                });
+                if (!customer) {
+                    throw new OrderError(`Customer ${customerPhone} not found`, 400, "CUSTOMER_NOT_FOUND");
+                }
+            }
+
+            // ── 3. Derive branchId (+ delivery fee and time for deliveries) ──
             let branchId: string;
+            let deliveryFee = 0;
+            let deliveryTime = 0; // minutes
 
             if (data.orderType === "delivery") {
                 // Shipping address belongs to exactly one branch
                 const address = await tx.shippingAddresses.findUnique({
                     where: { name: data.shippingAddressName },
-                    select: { branchId: true },
+                    select: { branchId: true, deliveryFee: true, deliveryTime: true },
                 });
                 if (!address) {
-                    throw new Error(`Shipping address "${data.shippingAddressName}" not found`);
+                    throw new OrderError(`Shipping address "${data.shippingAddressName}" not found`, 400, "ADDRESS_NOT_FOUND");
                 }
                 branchId = address.branchId;
+                deliveryFee = address.deliveryFee;
+                deliveryTime = address.deliveryTime;
+
+            } else if (isCustomer) {
+                // dineIn or pickup by a customer — the branch they selected
+                if (!data.branchId) {
+                    throw new OrderError("Please select a branch", 400, "BRANCH_REQUIRED");
+                }
+                const branch = await tx.branches.findUnique({
+                    where: { id: data.branchId },
+                    select: { id: true },
+                });
+                if (!branch) {
+                    throw new OrderError("Branch not found", 400, "BRANCH_NOT_FOUND");
+                }
+                branchId = branch.id;
 
             } else {
-                // dineIn or pickup — cashier is at the branch
+                // dineIn or pickup by staff — the employee's own branch
                 const employee = await tx.employees.findUnique({
-                    where: { email: req.user!.userId },
+                    where: { email: user.userId },
                     select: { branchId: true },
                 });
                 if (!employee?.branchId) {
-                    throw new Error("You are not assigned to any branch");
+                    throw new OrderError("You are not assigned to any branch", 403, "NO_BRANCH");
                 }
                 branchId = employee.branchId;
             }
 
-            // ── 2. Look up prices server-side (never trust client) ──
+            // ── 4. Look up prices server-side (never trust client) ──
             const productIds = data.items
                 .filter((i) => i.type === "product" && i.productId)
                 .map((i) => i.productId!);
@@ -63,36 +114,63 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
                 .filter((i) => i.type === "menu" && i.menuId)
                 .map((i) => i.menuId!);
 
-            const [products, menus] = await Promise.all([
+            const addonIds = data.items
+                .filter((i) => i.type === "addons" && i.addonId)
+                .map((i) => i.addonId!);
+
+            const [products, menus, addons] = await Promise.all([
                 productIds.length
-                    ? tx.products.findMany({ where: { id: { in: productIds } } })
+                    ? tx.products.findMany({
+                        where: { id: { in: productIds } },
+                        select: { id: true, name: true, price: true, variants: { select: { id: true, price: true } } },
+                    })
                     : [],
                 menuIds.length
                     ? tx.menu.findMany({ where: { id: { in: menuIds } } })
                     : [],
+                addonIds.length
+                    ? tx.addons.findMany({ where: { id: { in: addonIds } } })
+                    : [],
             ]);
 
-            const productPriceMap = new Map(products.map((p) => [p.id, p.price]));
+            const productMap = new Map(products.map((p) => [p.id, p]));
             const menuPriceMap = new Map(menus.map((m) => [m.id, m.price]));
+            const addonPriceMap = new Map(addons.map((a) => [a.id, a.price]));
 
-            // ── 3. Build order items with server-derived prices ──
+            // ── 5. Build order items with server-derived prices ──
             const orderItems = data.items.map((item) => {
                 let price: number;
+                let productVariantId: string | null = null;
 
                 if (item.type === "product") {
-                    price = productPriceMap.get(item.productId!) ?? 0;
-                    if (!price) throw new Error(`Product ${item.productId} not found`);
+                    const product = productMap.get(item.productId!);
+                    if (!product) throw new OrderError(`Product ${item.productId} not found`, 400, "INVALID_ITEM");
+
+                    if (product.variants.length === 0) {
+                        // No variants: base price
+                        price = product.price;
+                    } else {
+                        // Has variants: the customer must choose one, and pays its price
+                        const variant = product.variants.find((v) => v.id === item.productVariantId);
+                        if (!variant) throw new OrderError(`Please choose a valid variant for "${product.name}"`, 400, "INVALID_VARIANT");
+                        price = variant.price;
+                        productVariantId = variant.id;
+                    }
                 } else if (item.type === "menu") {
-                    price = menuPriceMap.get(item.menuId!) ?? 0;
-                    if (!price) throw new Error(`Menu ${item.menuId} not found`);
+                    const menuPrice = menuPriceMap.get(item.menuId!);
+                    if (menuPrice === undefined) throw new OrderError(`Menu ${item.menuId} not found`, 400, "INVALID_ITEM");
+                    price = menuPrice;
                 } else {
-                    // addons — you'll need addon price lookup later
-                    throw new Error("Addon pricing not implemented yet");
+                    const addonPrice = addonPriceMap.get(item.addonId!);
+                    if (addonPrice === undefined) throw new OrderError(`Addon ${item.addonId} not found`, 400, "INVALID_ITEM");
+                    price = addonPrice;
                 }
 
                 return {
-                    productId: item.productId ?? null,
-                    menuId: item.menuId ?? null,
+                    productId: item.type === "product" ? item.productId! : null,
+                    productVariantId,
+                    menuId: item.type === "menu" ? item.menuId! : null,
+                    addonId: item.type === "addons" ? item.addonId! : null,
                     quantity: item.quantity,
                     price,
                     type: item.type,
@@ -101,18 +179,20 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
                 };
             });
 
-            // ── 4. Compute totals ──
+            // ── 6. Compute totals ──
             const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
             const discount = 0; // TODO: compute from promotions
-            const total = subtotal - discount;
+            const total = subtotal - discount + deliveryFee; // deliveryFee is 0 for pickup / dine-in
 
-            // ── 5. Create the order ──
+            // ── 7. Create the order ──
+            // Staff who create the order are recorded from their token: cashiers as
+            // cashierEmail, any other employee (e.g. a waiter) as employeeEmail
             const newOrder = await tx.orders.create({
                 data: {
                     branchId,
-                    cashierEmail: data.cashierEmail,
-                    customerPhone: data.customerPhone,
-                    employeeEmail: data.employeeEmail,
+                    customerPhone, // undefined = walk-in customer
+                    cashierEmail: user.role === "CASHIER" ? user.userId : undefined,
+                    employeeEmail: !isCustomer && user.role !== "CASHIER" ? user.userId : undefined,
                     discount,
                     subtotal,
                     total,
@@ -149,7 +229,8 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
                     data: {
                         orderNumber: newOrder.number,
                         shippingAddressName: data.shippingAddressName,
-                        estimatedDeliveryTime: data.estimatedDeliveryTime,
+                        // now + the address's delivery time (minutes)
+                        estimatedDeliveryTime: new Date(Date.now() + deliveryTime * 60 * 1000),
                         status: "pending",
                     },
                 });
@@ -166,11 +247,8 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
     } catch (err: any) {
         console.error("createOrder transaction failed:", err);
 
-        // Surface "not found" errors as 400, not 500
-        if (err.message?.includes("not found")) {
-            res.status(400).json({
-                error: { message: err.message, code: "INVALID_ITEM" },
-            });
+        if (err instanceof OrderError) {
+            res.status(err.status).json({ error: { message: err.message, code: err.code } });
             return;
         }
 
@@ -187,7 +265,16 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
     const result = orderStatusQuerySchema.safeParse(req.query);
 
     if (!result.success) {
-        res.status(400).json({ error: result.error }); // 400 not 403 — it's a validation error
+        res.status(400).json({
+            error: {
+                message: "Validation failed",
+                code: "VALIDATION_ERROR",
+                details: result.error.issues.map((i) => ({
+                    field: i.path.join("."),
+                    message: i.message,
+                })),
+            },
+        });
         return;
     }
 
@@ -310,7 +397,7 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
             // ── 1. Verify order exists and get its type ──
             const existing = await tx.orders.findUnique({
                 where: { number },
-                select: { orderType: true },
+                select: { orderType: true, subtotal: true, discount: true, total: true },
             });
 
             if (!existing) {
@@ -321,11 +408,22 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
             const { pickupTime, table, driverEmail, estimatedDeliveryTime,
                     actualDeliveryTime, deliveryStatus, ...baseFields } = data;
 
+            // ── Discount: between 0 (checked by the schema) and the subtotal, and the
+            //    total follows it. total = subtotal - discount + delivery fee, so we
+            //    give back the old discount and take off the new one (the fee is kept).
+            let totalUpdate = {};
+            if (baseFields.discount !== undefined) {
+                if (baseFields.discount > existing.subtotal) {
+                    throw new OrderError("Discount cannot be more than the subtotal", 400, "INVALID_DISCOUNT");
+                }
+                totalUpdate = { total: existing.total + existing.discount - baseFields.discount };
+            }
+
             // ── 3. Update base order (only if there are base fields) ──
             if (Object.values(baseFields).some((v) => v !== undefined)) {
                 await tx.orders.update({
                     where: { number },
-                    data: baseFields,
+                    data: { ...baseFields, ...totalUpdate },
                 });
             }
 
@@ -371,6 +469,10 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
     } catch (err: any) {
         console.error("updateOrder failed:", err);
 
+        if (err instanceof OrderError) {
+            res.status(err.status).json({ error: { message: err.message, code: err.code } });
+            return;
+        }
         if (err.message === "Order not found") {
             res.status(404).json({ error: { message: "Order not found", code: "NOT_FOUND" } });
             return;
@@ -555,14 +657,20 @@ export const dispatchOrder = async (req: Request, res: Response): Promise<void> 
         }
 
         // ── 4. Update order + item statuses ──
+        // Only a new order can be dispatched. The status check is inside the update itself:
+        // dispatching twice, or a cancelled/finished order, would otherwise send it back to
+        // "kitchen" and reset items that are already ready.
         await prisma.$transaction(async (tx) => {
-            await tx.orders.update({
-                where: { number },
+            const updated = await tx.orders.updateMany({
+                where: { number, status: { in: ["pending", "confirmed"] } },
                 data: { status: "kitchen" },
             });
+            if (updated.count === 0) {
+                throw new OrderError(`Order cannot be dispatched while it is "${order.status}"`, 409, "INVALID_STATUS");
+            }
 
             await tx.orderItems.updateMany({
-                where: { orderNumber: number },
+                where: { orderNumber: number, status: "pending" },
                 data: { status: "in_station" },
             });
         });
@@ -578,6 +686,10 @@ export const dispatchOrder = async (req: Request, res: Response): Promise<void> 
     } catch (err: any) {
         console.error("dispatchOrder failed:", err);
 
+        if (err instanceof OrderError) {
+            res.status(err.status).json({ error: { message: err.message, code: err.code } });
+            return;
+        }
         if (err.message?.includes("no station")) {
             res.status(400).json({ error: { message: err.message, code: "MISSING_STATION" } });
             return;
@@ -600,7 +712,16 @@ export const updateOrderItemStatus = async (req: Request, res: Response): Promis
 
     const result = markItemStatusSchema.safeParse(req.body);
     if (!result.success) {
-        res.status(400).json({ error: result.error });
+        res.status(400).json({
+            error: {
+                message: "Validation failed",
+                code: "VALIDATION_ERROR",
+                details: result.error.issues.map((i) => ({
+                    field: i.path.join("."),
+                    message: i.message,
+                })),
+            },
+        });
         return;
     }
 
@@ -636,8 +757,13 @@ export const updateOrderItemStatus = async (req: Request, res: Response): Promis
                 const nextStatus =
                     order?.orderType === "delivery" ? "ready_for_delivery" : "ready";
 
-                await tx.orders.update({
-                    where: { number: item.orderNumber },
+                // Only promote an order that is still being prepared: an order already
+                // ready, out for delivery, delivered or cancelled must never move back
+                await tx.orders.updateMany({
+                    where: {
+                        number: item.orderNumber,
+                        status: { in: ["pending", "confirmed", "kitchen", "preparing"] },
+                    },
                     data: { status: nextStatus },
                 });
             }

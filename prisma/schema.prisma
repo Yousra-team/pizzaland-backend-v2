@@ -489,8 +489,8 @@ model Orders {
   branchId      String           @map("branch_id")
   cashier       Employees?       @relation(name: "CashierOrders", fields: [cashierEmail], references: [email])
   cashierEmail  String?          @map("cashier_email")
-  customer      Customers        @relation(fields: [customerPhone], references: [phone])
-  customerPhone String           @map("customer_phone")
+  customer      Customers?       @relation(fields: [customerPhone], references: [phone])
+  customerPhone String?          @map("customer_phone") // null = walk-in customer
   employee      Employees?       @relation(name: "EmployeeOrders", fields: [employeeEmail], references: [email])
   employeeEmail String?          @map("employee_email")
   discount      Float            @default(0)

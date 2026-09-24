@@ -260,6 +260,8 @@ _Update this section as features are completed._
 - [x] Delivery driver flow at `/api/v2/deliveries` (DELIVERY_DRIVER only): available, mine, claim, status (2026-09-24). `PATCH /:deliveryId/status` allows assigned → in_transit → delivered/failed (order status follows: `out_for_delivery` / `delivered`). Claim and status updates use a conditional `updateMany` so a delivery can't be double-claimed or finished twice
 - [ ] Migration for new `Deliveries` indexes `[driverEmail, status]` and `[status]` (in schema only — Chris creates/applies it)
 - [ ] Later (Chris): pagination for `GET /deliveries/mine?view=history`
+- [x] Orders routed at `/api/v2/orders` with auth + roles (2026-09-24). Customers can order (phone from token; pickup/dineIn send the chosen `branchId`, delivery uses the shipping address's branch). Prices are server-side incl. variant price (required when the product has variants), addons and delivery fee; `estimatedDeliveryTime` = now + `ShippingAddresses.deliveryTime` (assumed minutes); cashier/employee emails from the token. Discount updates are capped at the subtotal and recompute the total. Dispatch and item-ready promotion only act on orders still being prepared (conditional `updateMany`). Expected errors use the `OrderError` class in `order.service.ts`
+- [ ] Migration for walk-in customers: `Orders.customerPhone` is now optional (null = walk-in, pickup/dine-in only) — in schema, Chris creates/applies it
 
 ---
 

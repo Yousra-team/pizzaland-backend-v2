@@ -10,15 +10,17 @@ const orderItemSchema = z.object({
     productId:        z.string().optional(),
     productVariantId: z.string().optional(),
     menuId:           z.string().optional(),
+    addonId:          z.string().optional(),
     quantity:         z.number().int().min(1),
     type:             z.enum(itemTypeEnum),
 });
 
 // ── Base fields shared by all order types ──
+// cashierEmail / employeeEmail are NOT here: the server takes them from the token.
+// customerPhone: ignored for customers (taken from the token); for staff it is the
+// customer's phone, or left out for a walk-in customer (pickup / dine-in only).
 const baseOrder = {
-    cashierEmail:  z.email().optional(),
-    customerPhone: z.e164(),
-    employeeEmail: z.email().optional(),
+    customerPhone: z.e164().optional(),
     items:         z.array(orderItemSchema).min(1),
 };
 
@@ -28,18 +30,19 @@ export const createOrderSchema = z.discriminatedUnion("orderType", [
         ...baseOrder,
         orderType: z.literal("pickup"),
         pickupTime: z.coerce.date(),
+        branchId: z.string().optional(), // required for customers: the branch they pick up from
     }),
     z.object({
         ...baseOrder,
         orderType: z.literal("dineIn"),
         table: z.string(),
+        branchId: z.string().optional(), // required for customers: the branch they dine in
     }),
     z.object({
         ...baseOrder,
         orderType: z.literal("delivery"),
-        //driverEmail:           z.email(),
+        // branch, delivery fee and estimated delivery time all come from the shipping address
         shippingAddressName:   z.string(),
-        estimatedDeliveryTime: z.coerce.date(),
     }),
 ]);
 
@@ -59,7 +62,7 @@ export const orderStatusQuerySchema = z.object({
 export const updateOrderSchema = z.object({
     // ── Base order fields ──
     status:        z.enum(statusEnum).optional(),
-    discount:      z.number().optional(),
+    discount:      z.number().min(0).optional(), // max (the subtotal) is checked in updateOrder
     employeeEmail: z.email().optional(),
 
     // ── Pickup update ──

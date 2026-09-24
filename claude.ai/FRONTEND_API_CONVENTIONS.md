@@ -99,6 +99,30 @@ On updates the image is optional: send one only to replace it.
 - `PATCH /deliveries/:id/claim`: take a delivery; **409** means another driver got it first
 - `PATCH /deliveries/:id/status` with body `{ "status": "in_transit" | "delivered" | "failed" }`
 
+**Orders (`/orders`, login required):**
+- `POST /orders`: create an order. The server computes all prices, totals and times; never send them.
+  ```jsonc
+  {
+    "orderType": "pickup",            // "pickup" | "dineIn" | "delivery"
+    "branchId": "…",                  // pickup/dineIn by a customer: the branch they chose
+    "pickupTime": "2026-09-24T18:00:00Z",   // pickup only
+    // "table": "12",                 // dineIn only
+    // "shippingAddressName": "Bastos",     // delivery only (the branch comes from it)
+    // "customerPhone": "+2376…",     // staff only; leave out for a walk-in (not for delivery)
+    "items": [
+      { "type": "product", "productId": "…", "productVariantId": "…", "quantity": 2 },
+      { "type": "menu",    "menuId": "…",  "quantity": 1 },
+      { "type": "addons",  "addonId": "…", "quantity": 1 }
+    ]
+  }
+  ```
+  If a product has variants, `productVariantId` is **required** (400 `INVALID_VARIANT` otherwise).
+- `GET /orders/mine`: my current orders (`?view=history` for finished): customers
+- `GET /orders/branch`: my branch's orders (`?status=pending` to filter): staff
+- `PATCH /orders/:number/dispatch`: send to the kitchen (chef); **409** if already dispatched or finished
+- `PATCH /orders/items/:itemId/status`: body `{ "status": "ready" }`: kitchen staff
+- `PATCH /orders/:number`: update (cashier/manager); `discount` must be between 0 and the subtotal, and the total is recalculated
+
 **CRM:**
 - `GET /crm/products/:productId/reviews`: public
 - `POST|GET /crm/favorites`, `POST|GET /crm/reviews`: customers only
