@@ -1,19 +1,24 @@
 import { Request, Response } from "express";
+import * as z from "zod";
 import { prisma } from "../lib/prisma";
-import { fullOrderInclude } from "./delivery.schema";
+import { driverDeliveryInclude, deliveryStatusSchema } from "./delivery.schema";
 
-
-
+// All handlers run after authMiddleware + roleMiddleware("DELIVERY_DRIVER"),
+// so req.user.userId is the driver's email.
 
 
 // ── 1. Available deliveries at driver's branch (unassigned only) ──
 export const getAvailableDeliveries = async (req: Request, res: Response): Promise<void> => {
     const email = req.user?.userId;
+    if (!email) {
+        res.status(401).json({ error: { message: "Authentication required", code: "UNAUTHENTICATED" } });
+        return;
+    }
 
     try {
         const driver = await prisma.employees.findUnique({
             where: { email },
-            select: { branchId: true, role: true },
+            select: { branchId: true },
         });
 
         if (!driver?.branchId) {
@@ -29,17 +34,7 @@ export const getAvailableDeliveries = async (req: Request, res: Response): Promi
                 status: "pending",
                 order: { branchId: driver.branchId }, // same branch as driver
             },
-            include: {
-                shippingAddress: {
-                    select: {
-                        name: true, neighborhood: true,
-                        deliveryFee: true, deliveryTime: true,
-                    },
-                },
-                order: {
-                    include: fullOrderInclude,
-                },
-            },
+            include: driverDeliveryInclude,
             orderBy: { estimatedDeliveryTime: "asc" },
         });
 
@@ -75,31 +70,26 @@ export const claimDelivery = async (req: Request, res: Response): Promise<void> 
             // Fetch delivery + its order's branch
             const delivery = await tx.deliveries.findUnique({
                 where: { id: deliveryId },
-                select: {
-                    driverEmail: true,
-                    orderNumber: true,
-                    order: { select: { branchId: true } },
-                },
+                select: { order: { select: { branchId: true } } },
             });
 
             if (!delivery) throw new Error("Delivery not found");
-            if (delivery.driverEmail) throw new Error("Delivery already claimed");
             if (delivery.order.branchId !== driver.branchId) {
                 throw new Error("Delivery is not at your branch");
             }
 
-            // Claim it
-            await tx.deliveries.update({
-                where: { id: deliveryId },
-                data: {
-                    driverEmail: email,
-                    status: "assigned",
-                },
+            // Claim it in ONE query: the update only happens if the delivery is still
+            // unclaimed AND pending. If two drivers claim at the same moment, only one
+            // update matches; the other gets count 0. Finished deliveries never match.
+            const result = await tx.deliveries.updateMany({
+                where: { id: deliveryId, driverEmail: null, status: "pending" },
+                data: { driverEmail: email, status: "assigned" },
             });
+            if (result.count === 0) throw new Error("Delivery already claimed");
 
-            return tx.orders.findUniqueOrThrow({
-                where: { number: delivery.orderNumber },
-                include: fullOrderInclude,
+            return tx.deliveries.findUniqueOrThrow({
+                where: { id: deliveryId },
+                include: driverDeliveryInclude,
             });
         });
 
@@ -114,10 +104,13 @@ export const claimDelivery = async (req: Request, res: Response): Promise<void> 
             "Delivery is not at your branch": 403,
         };
 
-        const status = messageMap[err.message] ?? 500;
-        res.status(status).json({
-            error: { message: err.message ?? "Failed to claim delivery", code: "CLAIM_FAILED" },
-        });
+        const status = messageMap[err.message];
+        if (status) {
+            res.status(status).json({ error: { message: err.message, code: "CLAIM_FAILED" } });
+            return;
+        }
+        // Unknown error (e.g. database): never send its message to the client
+        res.status(500).json({ error: { message: "Failed to claim delivery", code: "CLAIM_FAILED" } });
     }
 };
 
@@ -125,6 +118,12 @@ export const claimDelivery = async (req: Request, res: Response): Promise<void> 
 // ── 3. Driver's own deliveries (active + history) ──
 export const getMyDeliveries = async (req: Request, res: Response): Promise<void> => {
     const email = req.user?.userId;
+    // Without this check, `driverEmail: undefined` means "no filter" to Prisma
+    // and every driver's deliveries would be returned
+    if (!email) {
+        res.status(401).json({ error: { message: "Authentication required", code: "UNAUTHENTICATED" } });
+        return;
+    }
 
     const view = req.query.view === "history" ? "history" : "active";
 
@@ -136,15 +135,7 @@ export const getMyDeliveries = async (req: Request, res: Response): Promise<void
                     ? { in: ["delivered", "failed"] }
                     : { in: ["assigned", "in_transit"] },
             },
-            include: {
-                shippingAddress: {
-                    select: {
-                        name: true, neighborhood: true,
-                        deliveryFee: true, deliveryTime: true,
-                    },
-                },
-                order: { include: fullOrderInclude },
-            },
+            include: driverDeliveryInclude,
             orderBy: { estimatedDeliveryTime: "asc" },
         });
 
@@ -154,5 +145,90 @@ export const getMyDeliveries = async (req: Request, res: Response): Promise<void
         res.status(500).json({
             error: { message: "Failed to fetch deliveries", code: "FETCH_FAILED" },
         });
+    }
+};
+
+
+// ── 4. Driver updates one of their deliveries ──
+//    assigned → in_transit (picked up), then assigned/in_transit → delivered or failed
+export const updateDeliveryStatus = async (req: Request, res: Response): Promise<void> => {
+    const email = req.user?.userId;
+    const deliveryId = req.params.deliveryId;
+
+    if (typeof deliveryId !== "string" || !email) {
+        res.status(400).json({ error: { message: "Invalid request", code: "INVALID_PARAM" } });
+        return;
+    }
+
+    const result = deliveryStatusSchema.safeParse(req.body);
+    if (!result.success) {
+        res.status(400).json({
+            error: { message: "Invalid status", code: "INVALID_BODY", details: z.flattenError(result.error).fieldErrors },
+        });
+        return;
+    }
+    const { status } = result.data;
+
+    try {
+        const updatedDelivery = await prisma.$transaction(async (tx) => {
+            const delivery = await tx.deliveries.findUnique({
+                where: { id: deliveryId },
+                select: { driverEmail: true, orderNumber: true },
+            });
+
+            if (!delivery) throw new Error("Delivery not found");
+            if (delivery.driverEmail !== email) throw new Error("Not your delivery");
+
+            // Which current statuses allow the move: in_transit only from assigned,
+            // delivered/failed from assigned or in_transit. Checked inside the update itself,
+            // so a finished delivery can never change again.
+            const allowedFrom: ("assigned" | "in_transit")[] =
+                status === "in_transit" ? ["assigned"] : ["assigned", "in_transit"];
+
+            const updated = await tx.deliveries.updateMany({
+                where: { id: deliveryId, driverEmail: email, status: { in: allowedFrom } },
+                data: {
+                    status,
+                    // undefined = leave the column unchanged
+                    actualDeliveryTime: status === "delivered" ? new Date() : undefined,
+                },
+            });
+            if (updated.count === 0) throw new Error("Delivery status cannot be changed");
+
+            // Keep the order in sync with the delivery
+            if (status === "in_transit") {
+                await tx.orders.update({
+                    where: { number: delivery.orderNumber },
+                    data: { status: "out_for_delivery" },
+                });
+            } else if (status === "delivered") {
+                await tx.orders.update({
+                    where: { number: delivery.orderNumber },
+                    data: { status: "delivered" },
+                });
+            }
+
+            return tx.deliveries.findUniqueOrThrow({
+                where: { id: deliveryId },
+                include: driverDeliveryInclude,
+            });
+        });
+
+        res.status(200).json({ data: updatedDelivery });
+    } catch (err: any) {
+        console.error("updateDeliveryStatus failed:", err);
+
+        const messageMap: Record<string, number> = {
+            "Delivery not found":                404,
+            "Not your delivery":                 403,
+            "Delivery status cannot be changed": 409,
+        };
+
+        const statusCode = messageMap[err.message];
+        if (statusCode) {
+            res.status(statusCode).json({ error: { message: err.message, code: "STATUS_UPDATE_FAILED" } });
+            return;
+        }
+        res.status(500).json({ error: { message: "Failed to update delivery status", code: "STATUS_UPDATE_FAILED" } });
     }
 };

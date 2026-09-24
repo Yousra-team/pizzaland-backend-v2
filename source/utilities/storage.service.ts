@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { supabase } from "../configurations/supabase";
 
-const BUCKET = "product-images";
+const BUCKET = "pizzaland-products-images";
 
 export async function uploadImage(
   buffer: Buffer,

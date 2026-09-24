@@ -18,19 +18,14 @@ export const addFavorite = async (req: Request, res: Response): Promise<void> =>
     }
 
     try {
-        // No unique constraint on (customerPhone, productId), so check to avoid duplicates
-        const existing = await prisma.favorites.findFirst({
-            where: { customerPhone, productId: result.data.productId }
+        // @@unique([customerPhone, productId]): upsert returns the existing favorite
+        // instead of failing when the customer favorites the same product twice
+        const favorite = await prisma.favorites.upsert({
+            where: { customerPhone_productId: { customerPhone, productId: result.data.productId } },
+            update: {},
+            create: { ...result.data, customerPhone }
         });
-        if (existing) {
-            res.status(200).json({ data: existing });
-            return;
-        }
-
-        const favorite = await prisma.favorites.create({
-            data: { ...result.data, customerPhone }
-        });
-        res.status(201).json({ data: favorite });
+        res.status(200).json({ data: favorite });
     } catch (error: any) {
         console.error("addFavorite failed:", error);
         if (error.code === "P2003") {

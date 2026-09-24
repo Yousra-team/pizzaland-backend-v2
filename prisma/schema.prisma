@@ -203,7 +203,7 @@ model Token {
 
 model Accounts {
   customerPhone String    @id @unique @map("customer_phone")
-  balance       Float     @default(0)
+  balance       Decimal   @default(0) @db.Decimal(14, 2)
   password      String
   customer      Customers @relation(fields: [customerPhone], references: [phone])
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -233,7 +233,7 @@ model Favorites {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
+  @@unique([customerPhone, productId]) // a customer can favorite a product only once
   @@index([productId])
   @@map("favorites")
 }
@@ -555,6 +555,8 @@ model Deliveries {
   updatedAt             DateTime          @updatedAt @map("updated_at")
 
   @@index([orderNumber])
+  @@index([driverEmail, status]) // a driver's active/history deliveries
+  @@index([status])              // available (pending) deliveries
   @@map("deliveries")
 }
 

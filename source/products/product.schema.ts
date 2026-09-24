@@ -20,7 +20,7 @@ export const AddonSchema = z.object({
 
 export const ProductVariantSchema = z.object({
     name : z.string(),
-    price : z.number(),
+    price : z.coerce.number(), // coerce: arrives as a string via form-data
 });
 
 export const CategorySchema = z.object({
@@ -71,7 +71,7 @@ export const MenuSchema = z.object({
   preparationTime: z.coerce.number().int().optional(), // Prisma has it as Int? (optional)
   MenuItems: z.array(z.object({
     productId: z.string(),
-    quantity: z.coerce.number(),
+    quantity: z.coerce.number().int().positive(), // MenuItems.quantity is an Int column
   }))
 });
 // A menu needs an Addons*

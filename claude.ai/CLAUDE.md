@@ -25,7 +25,7 @@ Pizzaland V2 is a restaurant management platform (ordering, POS, KDS, delivery) 
 | Validation | Zod 4 |
 | Auth | JWT (jsonwebtoken) + bcrypt, cookie-parser |
 | Messaging | Twilio (WhatsApp + SMS) |
-| Image storage | Supabase Storage (bucket: `pizzaland images`) |
+| Image storage | Supabase Storage (bucket: `pizzaland-products-images`) |
 | File uploads | Multer (memoryStorage) |
 | Secrets | Doppler — all commands prefixed with `doppler run --` |
 | Hosting | Sevalla (`backend.pizzaland.cm`) |
@@ -40,8 +40,8 @@ source/
   authentication/      # Auth module (register, login, verify, refresh, logout)
   configurations/      # supabase.ts and other config
   lib/                 # prisma.ts (shared Prisma client)
-  middlewares/         # upload.ts (multer), auth middleware
-  utilities/           # uploadImage.ts (Supabase Storage upload + delete)
+  middlewares/         # upload.image.ts (multer), auth, role, error.middleware.ts
+  utilities/           # storage.service.ts (Supabase Storage upload + delete)
   products/            # Products, categories, subcategories, addons, menus, variants
     product.controller.ts
     product.schema.ts
@@ -145,11 +145,11 @@ Key rules:
 - Cleanup failures are log-only — never block the response
 - Folder names: `"products"`, `"categories"`, `"subcategories"`, `"addons"`, `"menus"`
 
-**Utility location:** `source/utilities/uploadImage.ts`
+**Utility location:** `source/utilities/storage.service.ts`
 - `uploadImage(buffer, mimetype, folder)` → returns `{ path, url }`
 - `deleteImage(path)` → named export
 
-**Multer location:** `source/middlewares/upload.ts`
+**Multer location:** `source/middlewares/upload.image.ts` — its errors (wrong type, >5 MB, wrong field) are turned into 400 JSON by `source/middlewares/error.middleware.ts`, registered last in `app.ts`
 - `upload.single("image")` in routes that accept images
 - Limits: 5 MB, JPEG/PNG/WEBP only
 
@@ -224,6 +224,12 @@ Never hardcode these. Never commit `.env` files. Always run via `doppler run --`
 
 ---
 
+## Rules for Claude (set by Chris, 2026-09-24)
+
+- **Never apply migrations or take other high-impact actions on your own** (applying migrations, `db push`, writing to or resetting the database, deleting data, deploying, pushing, or anything hard to reverse). Chris, as the backend developer, makes those decisions and runs them himself unless he explicitly says otherwise. Prepare the change (e.g. a migration file) and hand it over.
+- **Do what is asked, no more.** A request to "review" means report findings; only change code when asked to fix.
+- **Avoid extreme code changes.** Prefer small, readable fixes that are easy to understand yet efficient over rewrites or clever abstractions.
+
 ## Developer preferences (Chris)
 
 - Prefers step-by-step explanations that mirror course material formatting
@@ -247,16 +253,22 @@ _Update this section as features are completed._
 - [ ] Delete endpoints (soft delete with deletedAt)
 - [ ] Menu CRUD with image upload
 - [ ] Auth middleware on protected routes
-- [ ] Multer error handling in error middleware
+- [x] Multer error handling in error middleware (2026-09-24) — also handles malformed JSON (400) and unexpected errors (500, fixed message)
 - [x] Branches + shipping addresses: full CRUD routed at `/api/v2/branches` (2026-09-24) — still uses old `{ error: "..." }` strings and hard delete, needs aligning with the locked decisions
-- [ ] CRM (favorites, reviews, preferences): `source/crm/crmRouter.ts` written with auth (2026-09-24), not yet mounted in `app.ts`
+- [x] CRM (favorites, reviews, preferences) mounted at `/api/v2/crm` with auth (2026-09-24)
+- [ ] Apply migration `20260924120000_crm_decimal_balance_unique_favorites` (written, NOT yet applied — run `npm run migrate`)
+- [x] Delivery driver flow at `/api/v2/deliveries` (DELIVERY_DRIVER only): available, mine, claim, status (2026-09-24). `PATCH /:deliveryId/status` allows assigned → in_transit → delivered/failed (order status follows: `out_for_delivery` / `delivered`). Claim and status updates use a conditional `updateMany` so a delivery can't be double-claimed or finished twice
+- [ ] Migration for new `Deliveries` indexes `[driverEmail, status]` and `[status]` (in schema only — Chris creates/applies it)
+- [ ] Later (Chris): pagination for `GET /deliveries/mine?view=history`
 
 ---
 
 ## Notes (Claude, 2026-09-24)
 
 - **Auth identity:** for customers `req.user.userId` is the phone number, for employees it is the email. `role` is `"CUSTOMER"` for customers. CRM handlers take `customerPhone` from the token, never from the body
-- **`source/crm/account.ts`** holds wallet helpers (`creditAccount`, `debitAccount`, `getAccountBalance`) meant to be called from orders/payments. `debitAccount` uses a single conditional `updateMany` so the balance can never go negative, even with parallel requests. They use the global `prisma`, so they can't yet join a `$transaction` — add a `tx` parameter when payments start using them
-- **Dead files:** `source/lib/cloudinary.ts` (Cloudinary is replaced by Supabase) and `source/validate.ts` (Zod 3 `.errors` API) are imported nowhere and are the only `tsc` errors left
-- **Schema gaps to consider (need a migration):** no `@@unique([customerPhone, productId])` on `Favorites` (service checks for duplicates manually); `@@unique([customerPhone, name])` on `UserPreferences` doesn't cover employees; `Accounts.balance` is `Float` (money should be `Int` in XAF or `Decimal`); no `deletedAt` on `Branches`/`ShippingAddresses` yet
+- **`source/crm/account.ts`** holds wallet helpers (`creditAccount`, `debitAccount`, `getAccountBalance`, coin conversions) meant to be called from orders/payments. `debitAccount` uses a single conditional `updateMany` so the balance can never go negative, even with parallel requests. They use the global `prisma`, so they can't yet join a `$transaction` — add a `tx` parameter when payments start using them
+- **Money:** `Accounts.balance` is `Decimal(14, 2)`. Do money/coin math with `Prisma.Decimal` (`.add/.sub/.mul/.div`), never JS `number`. Prisma returns Decimal objects; send them as `.toString()` in JSON. Other money columns (order totals, prices, variant prices, delivery fees) are still `Float` — candidates for the same change
+- **Favorites** has `@@unique([customerPhone, productId])`; `addFavorite` uses `upsert` on `customerPhone_productId`
+- **Migrations in a non-interactive shell (Claude):** `prisma migrate dev` refuses to run. Preview with `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`, write the folder by hand, and let Chris apply it
+- **Schema gaps still open:** `@@unique([customerPhone, name])` on `UserPreferences` doesn't cover employees; no `deletedAt` on `Branches`/`ShippingAddresses` yet
 - **Env var not listed above:** `YOUSRA_COINS_EXCHANGE_RATE` (XAF per coin, defaults to 25)

@@ -47,8 +47,8 @@ export const createProduct = async (req: Request, res: Response) => {
         newAddonsData = addonsResult.data
             .filter((addon) => !addon.id);
     }
-      // Variants
-      const VariantResult = z.array(ProductVariantSchema).safeParse(req.body.variants);
+      // Variants are optional: default([]) turns a missing field into an empty list
+      const VariantResult = z.array(ProductVariantSchema).default([]).safeParse(req.body.variants);
 
       if (!VariantResult.success) {
           return res.status(400).json({ error: { message: 'Invalid variant data', details: VariantResult.error } });
@@ -56,7 +56,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
     try {
        // 1. Upload the image to Supabase
-        const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "Products");
+        const uploaded = await uploadImage(req.file.buffer, req.file.mimetype, "products");
         uploadedPath = uploaded.path;
 
         const newProduct = await prisma.products.create({
@@ -158,7 +158,7 @@ export const makeMenu = async (req: Request, res: Response) => {
     }
 
     try {
-        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Menus")
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "menus")
         uploadedPath = uploaded.path;
 
         const newMenu = await prisma.menu.create({
@@ -252,7 +252,7 @@ export const createAddon = async (req: Request, res: Response) => {
 
     try {
 
-        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Addons")
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "addons")
         uploadedPath = uploaded.path
 
         const addon = result.data
@@ -316,7 +316,7 @@ export const createCategory = async (req: Request, res: Response) => {
     };
 
     try {
-        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "Categories")
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "categories")
         uploadedPath = uploaded.path
 
         const category = result.data
@@ -330,7 +330,7 @@ export const createCategory = async (req: Request, res: Response) => {
         });
         res.status(201).json({ data: newCategory, meta: null });
     } catch(error) {
-      console.error("Error Creating a Category");
+      console.error("Error creating category:", error);
       
         // 3. If the DB failed after the upload succeeded, delete the orphan file
         if (uploadedPath) {
@@ -380,7 +380,7 @@ export const createSubCategory = async (req: Request, res: Response) => {
     };
 
     try {
-        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "SubCategories")
+        const uploaded = await uploadImage(req.file.buffer , req.file.mimetype , "subcategories")
         uploadedPath = uploaded.path
 
         const subcategory = result.data
@@ -404,7 +404,7 @@ export const createSubCategory = async (req: Request, res: Response) => {
             }
         }
 
-      console.error("Error Creating a SubCategory");
+      console.error("Error creating subcategory:", error);
       res.status(500).json({error: {message: "Failed to create subcategory"}})
 
     }
