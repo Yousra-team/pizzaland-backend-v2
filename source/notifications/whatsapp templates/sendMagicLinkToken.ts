@@ -1,8 +1,8 @@
 import {sendWhatsapp} from "../sendWhatsapp.js";
 
 
-const CONTENT_SID = "";
-const CONTENT_SID_FR =""
+const CONTENT_SID = "HXca3363d04e6fe4272545af6a07e697d0";
+const CONTENT_SID_FR ="HXbb50217128fb6dfbc2f57d5ff62dceac"
 
 async function sendMagicLinkToken(params: {
     to: string;
