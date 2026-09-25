@@ -168,7 +168,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
              await sendMagicLinkToken({to: existingCustomer.phone, token: token, expiresIn: 5})// change expiresIn from string to number
              res.status(200).json({message:"verification code sent"})
          } else {
-             await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: 5})// change expiresIn from string to number
+             await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: "5"})// change expiresIn from string to number
              res.status(200).json({message:"code de vérification envoyé"})
          }
         res.status(200).json({message:"verification code sent", sendToken})

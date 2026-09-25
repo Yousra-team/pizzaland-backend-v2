@@ -17,7 +17,7 @@ async function sendMagicLinkToken(params: {
 
 async function sendMagicLinkTokenFR(params: {
     to: string;
-    expiresIn: number;
+    expiresIn: string; // test
     token: string;
 }) {
     await sendWhatsapp(params.to, CONTENT_SID_FR, {
