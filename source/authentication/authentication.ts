@@ -32,8 +32,6 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
 
         res.status(201).json(newCustomer);
 
-
-
     } catch (error) {
         console.error("Error registering customer:", error);
         res.status(500).json({ error: "Failed to register customer" });

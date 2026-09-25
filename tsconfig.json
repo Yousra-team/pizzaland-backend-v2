@@ -8,6 +8,8 @@
     "ignoreDeprecations": "6.0",
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
+    
+
 
     "rootDir": "./source",
     "outDir": "./dist"

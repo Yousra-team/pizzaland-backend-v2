@@ -19,13 +19,11 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-
     "dev": "doppler run -- tsx watch source/server.ts",
     "migrate": "doppler run -- npx prisma migrate dev",
     "studio": "doppler run -- npx prisma studio",
     "prisma:generate": "prisma generate",
     "start:local": "doppler run -- node dist/server.js",
-
     "build": "prisma generate && tsc",
     "start": "node dist/server.js",
     "migrate:deploy": "prisma migrate deploy"
@@ -34,10 +32,11 @@
     "@tsconfig/node22": "^22.0.5",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
-    "@types/node": "^25.7.0",
+    "@types/node": "^25.9.8",
     "@types/pg": "^8.20.0",
     "dotenv-cli": "^11.0.0",
     "tsx": "^4.21.0",
