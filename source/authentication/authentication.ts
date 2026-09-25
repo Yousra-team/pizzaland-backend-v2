@@ -1,52 +1,10 @@
 import {prisma} from "../lib/prisma.js";
 import {Request, Response} from "express";
-import * as z from "zod";
-//import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications.js"
+import { CustomerSchema , employeeLoginSchema , employeeSchema , customerLoginSchema  } from "./auth.schema.js";
+import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications/index.js"
 import * as crypto from "node:crypto";
 import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
 import {comparePassword, hashPassword} from "./bcrypt.util.js";
-
-
-const CustomerSchema = z.object({
-    firstName: z.string().min(1).max(25),
-    lastName: z.string().min(1).max(50).optional(),
-    email: z.email().optional(),
-    gender: z.enum(["Male", "Female", "Other"]).optional(),
-    phone: z.e164(),
-    dateOfBirth: z.coerce.date().optional()
-});
-
-const employeeSchema = z.object({
-    firstName: z.string().min(1, "First name is required").max(50, "First name must be at most 50 characters"),
-    lastName: z.string().min(1, "Last name is required").max(50, "Last name must be at most 50 characters"),
-    email: z.email("Invalid email address"),
-    phone: z.e164(),
-    password: z.string().min(6, "Password must be at least 6 characters"),
-    role: z.enum([
-        "ADMIN",
-        "CASHIER",
-        "KITCHEN_STAFF",
-        "KITCHEN_CHEF",
-        "DELIVERY_DRIVER",
-        "WAITER",
-        "MANAGER",
-        "DEVELOPER",
-        "MARKETING",
-        "HR",
-        "FINANCE",
-        "CONTROLLER",
-    ]),
-    branchId: z.string().optional(),
-});
-
-const customerLoginSchema = z.object({
-    phone:z.e164(),
-});
-
-const employeeLoginSchema = z.object({
-    email : z.email(),
-    password : z.string().min(6, "Password must be at least 6 characters"),
-})
 
 
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
@@ -57,10 +15,10 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
             res.status(400).json({ error: result.error});
             return;
         }
-        const {firstName , lastName , email , phone , gender , dateOfBirth} = result.data;
+        const customer = result.data;
 
         const existingCustomer = await prisma.customers.findUnique({
-            where: {phone: phone},
+            where: {phone: customer.phone},
         });
         if (existingCustomer) {
             res.status(400).json({ error: "Customer with this phone number already exists" });
@@ -68,12 +26,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
         }
         const newCustomer = await prisma.customers.create({
             data: {
-                firstName,
-                lastName,
-                email,
-                gender,
-                phone,
-                dateOfBirth,
+                ...customer
             },
         });
 
@@ -89,6 +42,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
 
 // This endpoint here is to register an employee, only accessible by admin and or manager
 export const registerEmployee = async (req: Request, res: Response): Promise<void> => {
+
     try {
         const result = employeeSchema.safeParse(req.body);
         if (!result.success) {
@@ -96,11 +50,11 @@ export const registerEmployee = async (req: Request, res: Response): Promise<voi
             return;
         }
 
-        const {firstName, lastName, email, phone, password, role, branchId} = result.data;
+        const employee = result.data;
 
         const existingEmployee = await prisma.employees.findUnique({
             where: {
-                email: email,
+                email: employee.email,
             },
         }); 
 
@@ -109,20 +63,16 @@ export const registerEmployee = async (req: Request, res: Response): Promise<voi
             return;
         }
 
-        const hashedPassword =  await hashPassword(password)
+        const hashedPassword =  await hashPassword(employee.password)
+
+        employee.password = hashedPassword
 
         const newEmployee = await prisma.employees.create({
             data: {
-                firstName,
-                lastName,
-                email,
-                phone,
-                password: hashedPassword,
-                role,
-                branchId,
+               ...employee
             },
         });
-        res.status(201).json({message:`Account created with email: ${email}`});
+        res.status(201).json({message:`Account created with email: ${employee.email}`});
 
     } catch (error) {
         console.log("Error registering employee:", error);
@@ -139,9 +89,9 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
             return;
         }
 
-        const {firstName, lastName, email, phone, password, role, branchId} = result.data
+        const admin = result.data
 
-        if (role !== "ADMIN") {
+        if (admin.role !== "ADMIN") {
             res.status(400).json({ error: "Only ADMIN role can be registered through this endpoint" });
             // We check if the role is not ADMIN, and if so, we return a 400 error with a message indicating that only ADMIN role can be registered through this endpoint.
             return;
@@ -149,7 +99,7 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
 
         const existingAdmin = await prisma.employees.findUnique({
             where: {
-                email: email,
+                email:admin.email
             },
         });
 
@@ -158,20 +108,15 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
             return;
         };
 
-        const hashedPassword = await hashPassword(password)
+        const hashedPassword = await hashPassword(admin.password)
+        admin.password = hashedPassword
 
         const newAdmin = await prisma.employees.create({
             data: {
-                firstName,
-                lastName,
-                email,
-                phone,
-                password : hashedPassword,
-                role,
-                branchId,
+                ...admin
             },
         });
-        res.status(201).json({message:`Admin account created with email: ${email}`});
+        res.status(201).json({message:`Admin account created with email: ${admin.password}`});
 
     } catch (error) {
         console.error("Error registering admin:", error);
@@ -209,8 +154,8 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
                 expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes from now
             },
         });
-        /*
-        This part is commented untill magic link template is approved
+        
+        
          // Get User language preference before sending the magic link token
          const preference = await prisma.userPreferences.findFirst({
              where: {
@@ -227,7 +172,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
          } else {
              await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: 5})// change expiresIn from string to number
              res.status(200).json({message:"code de vérification envoyé"})
-         }*/
+         }
         res.status(200).json({message:"verification code sent", sendToken})
     }catch (error) {
         console.error("Error logging in customer:", error);
@@ -256,38 +201,20 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+       const authToken = await signAccessToken({userId: email , role: existingEmployee.role})
+       const refreshToken = await signRefreshToken({userId: email , role: existingEmployee.role})
 
-        const token = crypto.randomBytes(32).toString("hex");
-        const sendToken =  await prisma.token.create({
-            data:{
-                token,
-                employeeEmail: existingEmployee.email,
-                employeeRole: existingEmployee.role,
-                type: "verificationToken",
-                expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes from now
-            },
-        });
-        /*
-        // Get User language preference before sending the magic link token
-        const preference = await prisma.userPreferences.findFirst({
-            where: {
-                employeeEmail: existingEmployee.email,
-                name: "preferredLanguage",
-            },
-        });
+        await prisma.token.create({
+                data:{
+                    token: refreshToken,
+                    employeeEmail: email,
+                    employeeRole: existingEmployee.role,
+                    type: "refreshToken",
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+            });
 
-        const preferredLanguage = preference?.value ?? "fr"
-
-        if (preferredLanguage == "en") {
-            await sendMagicLinkToken({to: existingEmployee.email, token: token, expiresIn: 5})// change expiresIn from string to number
-            res.status(200).json({message:`Verification code sent`})
-        } else {
-            await sendMagicLinkTokenFR({to: existingEmployee.email, token: token, expiresIn: 5})// change expiresIn from string to number
-            res.status(200).json({message:`Code de vérification envoyé`})
-        }
-            I may or May not Remove Phone verification for Employees
-        */
-        res.status(200).json({message:`Verification code sent`, sendToken})
+        res.status(200).json({message:`Log in successful` , authToken , refreshToken})
     }catch (error) {
         console.error("Error logging in employee:", error);
         res.status(500).json({ error: "Failed to login employee" });
@@ -320,7 +247,7 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
             return;
         }
 
-        const token = crypto.randomBytes(32).toString("hex");
+        /*const token = crypto.randomBytes(32).toString("hex");
         const sendToken =  await prisma.token.create({
             data:{
                 token,
@@ -350,7 +277,20 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
             res.status(200).json({message : "Code de vérification envoyé"})
         }
       */
-        res.status(200).json({message:"Welcome Yousra Admin", sendToken})
+        const authToken = await signAccessToken({userId: email , role: existingAdmin.role})
+       const refreshToken = await signRefreshToken({userId: email , role: existingAdmin.role})
+
+        await prisma.token.create({
+                data:{
+                    token: refreshToken,
+                    employeeEmail: email,
+                    employeeRole: existingAdmin.role,
+                    type: "refreshToken",
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+            });
+
+        res.status(200).json({message:`Log in successful` , authToken , refreshToken})
     }catch (error) {
         console.error("Error logging in admin:", error);
         res.status(500).json({ error: "Failed to login admin" });
