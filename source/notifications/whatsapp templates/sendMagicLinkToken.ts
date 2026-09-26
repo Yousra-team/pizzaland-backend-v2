@@ -6,7 +6,7 @@ const CONTENT_SID_FR ="HXbb50217128fb6dfbc2f57d5ff62dceac"
 
 async function sendMagicLinkToken(params: {
     to: string;
-    expiresIn: number;
+    expiresIn: string; //testing
     token: string;
 }) {
     await sendWhatsapp(params.to, CONTENT_SID, {
@@ -17,7 +17,7 @@ async function sendMagicLinkToken(params: {
 
 async function sendMagicLinkTokenFR(params: {
     to: string;
-    expiresIn: string; // test
+    expiresIn: string; // testing if should be a string
     token: string;
 }) {
     await sendWhatsapp(params.to, CONTENT_SID_FR, {
