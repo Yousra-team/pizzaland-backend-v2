@@ -5,6 +5,7 @@ import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications/index.j
 import * as crypto from "node:crypto";
 import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
 import {comparePassword, hashPassword} from "./bcrypt.util.js";
+import * as z from "zod";
 
 
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
@@ -199,8 +200,8 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-       const authToken = await signAccessToken({userId: email , role: existingEmployee.role})
-       const refreshToken = await signRefreshToken({userId: email , role: existingEmployee.role})
+       const authToken = await signAccessToken({Id: email , role: existingEmployee.role})
+       const refreshToken = await signRefreshToken({Id: email , role: existingEmployee.role})
 
         await prisma.token.create({
                 data:{
@@ -275,8 +276,8 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
             res.status(200).json({message : "Code de vérification envoyé"})
         }
       */
-        const authToken = await signAccessToken({userId: email , role: existingAdmin.role})
-       const refreshToken = await signRefreshToken({userId: email , role: existingAdmin.role})
+        const authToken = await signAccessToken({Id: email , role: existingAdmin.role})
+       const refreshToken = await signRefreshToken({Id: email , role: existingAdmin.role})
 
         await prisma.token.create({
                 data:{
@@ -322,8 +323,8 @@ export const verifyToken = async (req: Request, res: Response): Promise<void> =>
         }
 
         if (existingToken.customerPhone && existingToken.type == "verificationToken") {
-            authToken = signAccessToken({ userId: existingToken.customerPhone, role: "CUSTOMER" });
-            refreshToken = signRefreshToken({ userId: existingToken.customerPhone, role: "CUSTOMER" });
+            authToken = signAccessToken({ Id: existingToken.customerPhone, role: "CUSTOMER" });
+            refreshToken = signRefreshToken({ Id: existingToken.customerPhone, role: "CUSTOMER" });
             // Persist refresh Tokens
             await prisma.token.create({
                 data:{
@@ -343,8 +344,8 @@ export const verifyToken = async (req: Request, res: Response): Promise<void> =>
             });
 
         } else if (existingToken.employeeEmail && existingToken.type == "verificationToken") {
-            authToken = signAccessToken({ userId: existingToken.employeeEmail, role: existingToken.employeeRole });
-            refreshToken = signRefreshToken({ userId: existingToken.employeeEmail, role: existingToken.employeeRole });
+            authToken = signAccessToken({  Id: existingToken.employeeEmail, role: existingToken.employeeRole });
+            refreshToken = signRefreshToken({ Id: existingToken.employeeEmail, role: existingToken.employeeRole });
             // Persist Refresh Token
             await prisma.token.create({
                 data:{
@@ -419,7 +420,7 @@ export const refreshAccessToken = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        const newAccessToken = signAccessToken({ userId: payload.userId, role: payload.role });
+        const newAccessToken = signAccessToken({ Id: payload.Id, role: payload.role });
 
         res.status(200).json({ authToken: newAccessToken });
 
@@ -446,5 +447,27 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     } catch (error) {
         console.error("Error logging out:", error);
         res.status(500).json({ error: "Failed to logout" });
+    }
+};
+
+export const UpdateCustomerAccount = async(req: Request , res: Response) => {
+    const customerPhone = req.user.id
+    
+    if(!customerPhone){
+      res.status(401).json({error:"You are not logged in"})
+      return;
+    }
+
+    try {
+      const result = CustomerSchema.omit({phone : true}).partial().strict().safeParse(req.body)
+      
+      if(!result.success){
+        const formattedErrors = z.flattenError(req.body)
+        res.status(403).json({message:"Schema error sorry", error: formattedErrors.fieldErrors})
+      }
+        
+    } catch (error) {
+        res.status(500).json({message:"Internal server error"})
+        console.log(error)
     }
 };

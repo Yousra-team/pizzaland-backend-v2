@@ -1,4 +1,4 @@
-import { reviewSchema , favoriteSchema , userPreferenceSchema } from "./crm.schema.js";
+import { reviewSchema , favoriteSchema , userPreferenceSchema, AddresSchema } from "./crm.schema.js";
 import * as z from "zod";
 import { Request, Response } from "express";
 import { prisma } from '../lib/prisma.js';
@@ -97,6 +97,40 @@ export const addUserPreference = async (req: Request, res: Response): Promise<vo
     }
 };
 
+export const createAddress = async(req: Request, res: Response) => {
+    const customerPhone = req.user.id;
+    
+    if(!customerPhone) {
+        res.status(401).json({message : "You are not logged In"});
+        return;
+    };
+
+
+    try {
+        const result = AddresSchema.safeParse(req.body);
+        if(!result.success) {
+             const formattedErrors = z.flattenError(result.error); 
+            res.status(403).json({message :"Oh Oh there's a typo", error: formattedErrors.fieldErrors })
+            return;
+        };
+       
+        let addressData = result.data
+
+        const address = await prisma.address.create({
+            data:{
+              customerPhone : customerPhone,
+              ...addressData
+
+            },
+        });
+         res.status(200).json(address);
+        
+    } catch (error) {
+         console.log("Error Creating an address:" , error)
+         res.status(500).json({message:"Sorry An internal error has occurred"});
+    }
+}; 
+
 // GET SECTION
 
 // Get all reviews for a specific product (public)
@@ -148,9 +182,9 @@ export const getFavoritesByCustomerPhone = async (req: Request, res: Response): 
 
 // Get all preferences of the logged-in user (customer or employee)
 export const getUserPreferences = async (req: Request, res: Response): Promise<void> => {
-    const owner = req.user!.role === "CUSTOMER"
-        ? { customerPhone: req.user!.userId }
-        : { employeeEmail: req.user!.userId };
+    const owner = req.user.role === "CUSTOMER"
+        ? { customerPhone: req.user.Id }
+        : { employeeEmail: req.user.Id };
     try {
         const userPreferences = await prisma.userPreferences.findMany({
             where: owner
@@ -159,5 +193,50 @@ export const getUserPreferences = async (req: Request, res: Response): Promise<v
     } catch (error) {
         console.error("getUserPreferences failed:", error);
         res.status(500).json({ error: { message: "Failed to fetch user preferences" } });
+    }
+};
+
+export const getCustomerAddress = async(req: Request, res:Response): Promise<void> => {
+    const CustomerPhone = req.user.id;
+    
+    if (!CustomerPhone) {
+        res.status(401).json(401).json({message: "You are not logged In"})
+    };
+
+    try {
+        const address = await prisma.address.findMany({
+            where: {customerPhone : CustomerPhone},
+        });
+    } catch (error) {
+        console.log("Error on our side:", error)
+        res.status(500).json({message:"Internal error"})
+    }
+};
+
+// Get customers
+export const getCustomers = async (req: Request, res: Response): Promise<void> => {
+    try {
+         const customers = await prisma.customers.findMany()
+         res.status(200).json({message: "Customer found successfully", customers})
+    } catch (error) {
+        console.log("Getting customer failed" , error)
+        res.status(500).json({message:"Failed to find customers"})
+    }
+};
+
+// DELETE ENDPOINTS : You are here to Delete
+
+export const deleteAddress = async (req: Request , res: Response): Promise<void> => {
+    const id = req.params.id as string
+
+    try {
+         const address = await prisma.address.delete({
+            where: {id}
+         });
+
+         res.status(200).json({message: "Address Deleted", address})
+    } catch (error) {
+        console.log("Deleting address failed", error)
+        res.status(500).json({message: "Failed to find customers"})
     }
 };

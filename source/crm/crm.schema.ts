@@ -53,3 +53,9 @@ export const userPreferenceSchema = z.object({
   name: z.enum(PREFERENCE_NAMES, { message: 'Invalid preference name' }),
   value: z.string().min(1, { message: 'Preference value is required' }),
 });
+
+// The Customer's addresses 
+export const AddresSchema = z.object({
+   name : z.string(),
+   shippingAddressName: z.string(),
+});

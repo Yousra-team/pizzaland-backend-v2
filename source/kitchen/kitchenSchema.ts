@@ -6,6 +6,7 @@ export const stationSchema = z.object({
    branchId: z.string()
 });
 
+
 export const stationSessionSchema = z.object({
     stationId: z.string(),
     kitchenStaffEmail: z.email(),

@@ -6,6 +6,7 @@ import deliveryRoutes from './delivery/deliveryRouter.js';
 import authRouter from './authentication/authenticationRouter.js'
 import crmRoutes from './crm/crmRouter.js';
 import orderRoutes from './orders/ordersRouter.js';
+import kitchenRoutes from './kitchen/kitchenRouter.js'
 import errorMiddleware from './middlewares/error.middleware.js';
 import cors from "cors";
 
@@ -32,7 +33,7 @@ app.use(express.urlencoded({extended:true}));
 app.use(cookieParser());
 
 
-//app.use("/api/v2/categories", categoryRoutes);
+app.use("/api/v2/kitchen", kitchenRoutes)
 app.use("/api/v2/products", productRoutes);
 app.use("/api/v2/branches", branchRoutes);
 app.use("/api/v2/deliveries", deliveryRoutes);

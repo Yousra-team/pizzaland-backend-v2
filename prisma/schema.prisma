@@ -213,6 +213,7 @@ model Accounts {
 
 model Address {
   id                  String            @id @default(uuid())
+  name                String?            
   customer            Customers         @relation(fields: [customerPhone], references: [phone])
   customerPhone       String            @map("customer_phone")
   shippingAddress     ShippingAddresses @relation(fields: [shippingAddressName], references: [name])

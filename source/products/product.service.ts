@@ -429,7 +429,7 @@ export const createManySubCategories = async (req: Request, res: Response) => {
     }   
 };
 
-// GET ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES
+// GET ENDPOINTS : PRODUCTS , ADDONS , VARIANTS , CATEGORIES , SUBCATEGORIES , MENUS
 
 
 // Function to Fetch All Products
@@ -563,6 +563,44 @@ export const getAddonById = async (req: Request, res: Response) => {
     catch (error) {
         console.error("Error fetching addons:", error);
         res.status(500).json({ error: { message: "Failed to fetch addons" } });
+    }
+};
+
+export const getMenus = async (req: Request , res: Response) => {
+    try {
+        const menus = await prisma.menu.findMany({
+            include: {
+            items: {
+                 include: {
+                    product: { select: { id: true, name: true, price: true } },
+                    menu:   { select: { id: true, name: true, price: true } },
+                 },
+           }}
+    });
+        res.status(200).json({message: "Here is the menu list:", menus})
+    } catch (error) {
+       res.status(500).json({message: "Sorry an error on our side"})
+       console.error(error)
+    }
+};
+
+export const getMenuById = async (req: Request , res: Response) => {
+    const id = req.params.id as string
+    try {
+        const menus = await prisma.menu.findUnique({
+            where: {id},
+            include: {
+            items: {
+                 include: {
+                    product: { select: { id: true, name: true, price: true } },
+                    menu:   { select: { id: true, name: true, price: true } },
+                 },
+           }}
+    });
+        res.status(200).json({message: "Here is the menu list:", menus})
+    } catch (error) {
+       res.status(500).json({message: "Sorry an error on our side"})
+       console.error(error)
     }
 };
 

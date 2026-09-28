@@ -10,6 +10,7 @@ import {
     verifyToken,
     refreshAccessToken,
     logout,
+    UpdateCustomerAccount,
 } from "./authentication.js"; // adjust path to wherever this file actually lives
 import roleMiddleware from "../middlewares/role.middleware.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
@@ -30,5 +31,8 @@ router.post("/admins/login", loginAdmin);
 router.post("/verify", verifyToken);
 router.post("/refresh", refreshAccessToken);
 router.post("/logout", logout);
+
+//Updates
+router.patch("/customers", authMiddleware , roleMiddleware("CUSTOMER"), UpdateCustomerAccount)
 
 export default router;

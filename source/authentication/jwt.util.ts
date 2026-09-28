@@ -12,7 +12,7 @@ const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
 export interface TokenPayload {
-    userId: string;
+    Id: string;
     role: string | null;
 }
 
