@@ -6,6 +6,7 @@ import {
     getAddons, getAddonById,
     updateProductById, updateCategoryById, updateSubcategoryById, updateAddonsById,
     getMenus,
+    getMenuById,
 } from "./product.service.js";
 import { upload } from "../middlewares/upload.image.js";
 
@@ -34,7 +35,7 @@ router.get("/subcategories/:id", getSubCategoryById);
 router.get("/addons", getAddons);
 router.get("/addons/:id", getAddonById);
 router.get("/menus", getMenus);
-router.get("/menus/:id", getMenus);
+router.get("/menus/:id", getMenuById);
 
 // UPDATE ENDPOINTS
 router.patch("/products/:id", upload.single("image"), updateProductById);
