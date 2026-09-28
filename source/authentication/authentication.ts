@@ -143,7 +143,19 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
             res.status(400).json({ error: "Customer with this phone number does not exist" });
             return;
         }
+           // This part shall be removed too only verify can grant these tokens
+        const authToken = await signAccessToken({Id: existingCustomer.phone , role:"CUSTOMER"})
+        const refreshToken = await signRefreshToken({Id: existingCustomer.phone, role:"CUSTOMER"})
 
+           await prisma.token.create({
+                data:{
+                    token: refreshToken,
+                    customerPhone: existingCustomer.phone,
+                    type: "refreshToken",
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+            });
+/* // Commented untill we finish testing
         const token = crypto.randomBytes(32).toString("hex");
        const sendToken =  await prisma.token.create({
             data:{
@@ -172,7 +184,16 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
              await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: "5"})// change expiresIn from string to number
              res.status(200).json({message:"code de vérification envoyé"})
          }
-        res.status(200).json({message:"verification code sent", sendToken})
+             */
+         // Refresh token goes in an httpOnly cookie — JS on the client can't read it
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: true,       // HTTPS only
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
+        res.status(200).json({message:"verification code sent", authToken })
     }catch (error) {
         console.error("Error logging in customer:", error);
         res.status(500).json({ error: "Failed to login customer" });
