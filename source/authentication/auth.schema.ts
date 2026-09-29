@@ -9,6 +9,8 @@ export const CustomerSchema = z.object({
     dateOfBirth: z.coerce.date().optional()
 });
 
+
+
 export  const employeeSchema = z.object({
     firstName: z.string().min(1, "First name is required").max(50, "First name must be at most 50 characters"),
     lastName: z.string().min(1, "Last name is required").max(50, "Last name must be at most 50 characters"),
@@ -33,7 +35,8 @@ export  const employeeSchema = z.object({
 });
 
 export const customerLoginSchema = z.object({
-    phone:z.e164(),
+    phone: z.e164(),
+    channel: z.enum(["sms","whatsapp"])
 });
 
 export const employeeLoginSchema = z.object({

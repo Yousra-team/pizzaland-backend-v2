@@ -151,7 +151,6 @@ model Customers {
   email           String?           @unique
   gender          Gender?
   dateOfBirth     DateTime?         @map("date_of_birth")
-  verified        Boolean           @default(false)
   accounts        Accounts?
   orders          Orders[]
   reservations    Reservations[]
@@ -213,7 +212,7 @@ model Accounts {
 
 model Address {
   id                  String            @id @default(uuid())
-  name                String?            
+  name                String?
   customer            Customers         @relation(fields: [customerPhone], references: [phone])
   customerPhone       String            @map("customer_phone")
   shippingAddress     ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
@@ -557,7 +556,7 @@ model Deliveries {
 
   @@index([orderNumber])
   @@index([driverEmail, status]) // a driver's active/history deliveries
-  @@index([status])              // available (pending) deliveries
+  @@index([status]) // available (pending) deliveries
   @@map("deliveries")
 }
 

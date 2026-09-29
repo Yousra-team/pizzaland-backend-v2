@@ -3,14 +3,14 @@ import { Router } from "express";
 import {
     registerCustomer,
     registerEmployee,
-    registerEmployeeAsAdmin,
+    registerAdmin,
     loginCustomer,
     loginEmployee,
     loginAdmin,
-    verifyToken,
     refreshAccessToken,
     logout,
     UpdateCustomerAccount,
+    verifyCustomer,
 } from "./authentication.js"; // adjust path to wherever this file actually lives
 import roleMiddleware from "../middlewares/role.middleware.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
@@ -20,7 +20,7 @@ const router = Router();
 // Registration
 router.post("/customers/register", registerCustomer);
 router.post("/employees/register", authMiddleware , roleMiddleware("ADMIN","MANAGER"), registerEmployee);
-router.post("/employees/register-admin", registerEmployeeAsAdmin);
+router.post("/employees/register-admin", registerAdmin);
 
 // Login — issues a magic link / verification code
 router.post("/customers/login", loginCustomer);
@@ -28,11 +28,13 @@ router.post("/employees/login", loginEmployee);
 router.post("/admins/login", loginAdmin);
 
 // Shared verification + token lifecycle
-router.post("/verify", verifyToken);
+router.post("/verify", verifyCustomer);
 router.post("/refresh", refreshAccessToken);
 router.post("/logout", logout);
 
 //Updates
 router.patch("/customers", authMiddleware , roleMiddleware("CUSTOMER"), UpdateCustomerAccount)
+
+
 
 export default router;

@@ -46,7 +46,7 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
             // ── 2. Who is the customer? ──
             // Customers order for themselves (phone from the token). Staff enter the
             // customer's phone, or leave it out for a walk-in customer.
-            const customerPhone = isCustomer ? user.userId : data.customerPhone;
+            const customerPhone = isCustomer ? user.Id : data.customerPhone;
 
             if (!customerPhone && data.orderType === "delivery") {
                 throw new OrderError("A customer phone is required for delivery orders", 400, "CUSTOMER_REQUIRED");

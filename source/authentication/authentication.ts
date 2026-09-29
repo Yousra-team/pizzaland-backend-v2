@@ -1,11 +1,11 @@
 import {prisma} from "../lib/prisma.js";
 import {Request, Response} from "express";
 import { CustomerSchema , employeeLoginSchema , employeeSchema , customerLoginSchema  } from "./auth.schema.js";
-import {sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications/index.js"
-import * as crypto from "node:crypto";
+import {createVerification, createVerificationCheck, sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications/index.js"
 import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
 import {comparePassword, hashPassword} from "./bcrypt.util.js";
 import * as z from "zod";
+
 
 
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
@@ -71,7 +71,7 @@ export const registerEmployee = async (req: Request, res: Response): Promise<voi
                ...employee
             },
         });
-        res.status(201).json({message:`Account created with email: ${employee.email}`});
+        res.status(201).json({message:`Account created with email: ${employee.email}`, newEmployee});
 
     } catch (error) {
         console.log("Error registering employee:", error);
@@ -80,7 +80,7 @@ export const registerEmployee = async (req: Request, res: Response): Promise<voi
 };
 
 // This endpoint will register the admin role
-export const registerEmployeeAsAdmin = async (req: Request, res: Response): Promise<void> => {
+export const registerAdmin = async (req: Request, res: Response): Promise<void> => {
     try {
         const result = employeeSchema.safeParse(req.body);
         if (!result.success) {
@@ -92,9 +92,14 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
 
         if (admin.role !== "ADMIN") {
             res.status(400).json({ error: "Only ADMIN role can be registered through this endpoint" });
-            // We check if the role is not ADMIN, and if so, we return a 400 error with a message indicating that only ADMIN role can be registered through this endpoint.
+            console.log("Your role is not admin")
             return;
         }
+
+        if (!admin.email.endsWith("@yousracompany.com")) {
+            res.status(403).json({message: "Haha That was smart but you dont work here!"});
+            console.log("Better luck next time!")
+        };
 
         const existingAdmin = await prisma.employees.findUnique({
             where: {
@@ -104,6 +109,7 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
 
         if (existingAdmin) {
             res.status(400).json({ error: "Admin with this email already exists" });
+            console.log("Admin Already Exists!")
             return;
         };
 
@@ -115,7 +121,7 @@ export const registerEmployeeAsAdmin = async (req: Request, res: Response): Prom
                 ...admin
             },
         });
-        res.status(201).json({message:`Admin account created with email: ${admin.password}`});
+        res.status(201).json({message:`Admin account created with email: ${admin.email}`});
 
     } catch (error) {
         console.error("Error registering admin:", error);
@@ -132,32 +138,30 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
             return;
         }
         const phone = result.data.phone;
+        const channel = result.data.channel;
 
         const existingCustomer = await prisma.customers.findUnique({
             where: {
-                phone: phone,
+                phone,
             },
         })
 
         if (!existingCustomer) {
             res.status(400).json({ error: "Customer with this phone number does not exist" });
+            console.log("Shall You register first?!")
             return;
         }
-           // This part shall be removed too only verify can grant these tokens
-        const authToken = await signAccessToken({Id: existingCustomer.phone , role:"CUSTOMER"})
-        const refreshToken = await signRefreshToken({Id: existingCustomer.phone, role:"CUSTOMER"})
-
-           await prisma.token.create({
-                data:{
-                    token: refreshToken,
-                    customerPhone: existingCustomer.phone,
-                    type: "refreshToken",
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-            });
-/* // Commented untill we finish testing
-        const token = crypto.randomBytes(32).toString("hex");
-       const sendToken =  await prisma.token.create({
+        
+        if(channel == "sms")  {     
+            await createVerification(existingCustomer.phone)
+            res.status(200).json({message:"You need to verify first Buddy"})
+            console.log("You need to verify yourself")
+        };
+             
+       if (channel == "whatsapp") {
+                /* // Commented untill we finish testing
+           const token = crypto.randomBytes(32).toString("hex");
+           const sendToken =  await prisma.token.create({
             data:{
                 token,
                 customerPhone: existingCustomer.phone,
@@ -185,18 +189,111 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
              res.status(200).json({message:"code de vérification envoyé"})
          }
              */
-         // Refresh token goes in an httpOnly cookie — JS on the client can't read it
-        res.cookie("refreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,       // HTTPS only
-            sameSite: "strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
+        };
 
-        res.status(200).json({message:"verification code sent", authToken })
+       if (!channel) {
+            res.status(403).json({message:" You need to specify channel"})
+            console.log("Specify Channel")
+       };
+    
+      res.status(200).json({message:"verification code sent" })
     }catch (error) {
         console.error("Error logging in customer:", error);
         res.status(500).json({ error: "Failed to login customer" });
+    }
+};
+
+export const verifyCustomer = async (req: Request , res: Response): Promise<void> => {
+    try {
+        const phone = req.body.phone
+        const code = req.body.code
+        const token = req.body.token
+
+        if(!token) {
+            if (!phone || !code) {
+                res.status(403).json({message:" You need either phone and code or token"})
+                return;
+            }
+           
+           const verify: any = await createVerificationCheck(phone , code);
+        
+          if (verify.status !== "approved") {
+              res.status(403).json({message: "Wrong OTP or could not verify"});
+              return;
+           }
+
+              await prisma.customers.update({
+                  where: {phone},
+                  data: {verified: true},
+              }); 
+               
+             const authToken = await signAccessToken({Id: phone , role:"CUSTOMER"})
+             const refreshToken = await signRefreshToken({Id: phone, role:"CUSTOMER"})
+
+             await prisma.token.create({
+                  data:{
+                     token: refreshToken,
+                     customerPhone: phone,
+                     type: "refreshToken",
+                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+              }); 
+
+           // Refresh token goes in an httpOnly cookie — JS on the client can't read it
+             res.cookie("refreshToken", refreshToken, {
+                  httpOnly: true,
+                  secure: true,       // HTTPS only
+                  sameSite: "strict",
+                 maxAge: 7 * 24 * 60 * 60 * 1000,
+              });
+
+              res.status(200).json({message: "Customer verified" , authToken});
+              console.log("Verification Was Successful")
+        };
+
+      const existingToken = await prisma.token.findUnique({
+            where: {
+                token: token
+            }
+        });
+
+      if (!existingToken) {
+            res.status(400).json({ error: "Token has expired or is corrupted" });
+            return;
+        }
+
+     if (existingToken.expiresAt < new Date()) {
+            await prisma.token.delete({ where: { token: existingToken.token } });
+            res.status(400).json({ error: "Token has expired" });
+            return;
+        }
+    
+    // Later we might need admin to use this so future if / else
+    
+       const authToken = await signAccessToken({Id: phone , role:"CUSTOMER"})
+             const refreshToken = await signRefreshToken({Id: phone, role:"CUSTOMER"})
+
+             await prisma.token.create({
+                  data:{
+                     token: refreshToken,
+                     customerPhone: phone,
+                     type: "refreshToken",
+                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                },
+              }); 
+
+           // Refresh token goes in an httpOnly cookie — JS on the client can't read it
+             res.cookie("refreshToken", refreshToken, {
+                  httpOnly: true,
+                  secure: true,       // HTTPS only
+                  sameSite: "strict",
+                 maxAge: 7 * 24 * 60 * 60 * 1000,
+              });
+        res.status(200).json({authToken})
+  
+    } catch (error) {
+       console.error(error)
+       res.status(500).json({message:"Internal Error Occurred"})
     }
 };
 
@@ -234,7 +331,15 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
                 },
             });
 
-        res.status(200).json({message:`Log in successful` , authToken , refreshToken})
+           // Refresh token goes in an httpOnly cookie — JS on the client can't read it
+             res.cookie("refreshToken", refreshToken, {
+                  httpOnly: true,
+                  secure: true,       // HTTPS only
+                  sameSite: "strict",
+                 maxAge: 7 * 24 * 60 * 60 * 1000,
+              });
+
+        res.status(200).json({message:`Log in successful` , authToken})
     }catch (error) {
         console.error("Error logging in employee:", error);
         res.status(500).json({ error: "Failed to login employee" });
@@ -266,7 +371,7 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
             res.status(403).json({ error: "Access denied. Only admins can log in through this endpoint." });
             return;
         }
-
+      // When Send Grid Will be SetUp 
         /*const token = crypto.randomBytes(32).toString("hex");
         const sendToken =  await prisma.token.create({
             data:{
@@ -310,111 +415,22 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
                 },
             });
 
-        res.status(200).json({message:`Log in successful` , authToken , refreshToken})
+           // Refresh token goes in an httpOnly cookie — JS on the client can't read it
+             res.cookie("refreshToken", refreshToken, {
+                  httpOnly: true,
+                  secure: true,       // HTTPS only
+                  sameSite: "strict",
+                 maxAge: 7 * 24 * 60 * 60 * 1000,
+              });
+
+        res.status(200).json({message:`Log in successful` , authToken})
     }catch (error) {
         console.error("Error logging in admin:", error);
         res.status(500).json({ error: "Failed to login admin" });
     }
 };
 
-export const verifyToken = async (req: Request, res: Response): Promise<void> => {
-    try{
-        const token = req.body.token
-        let authToken: string , refreshToken: string
 
-        if (!token) {
-            res.status(400).json({ error: "Token is required" });
-            return;
-        }
-
-        const existingToken = await prisma.token.findUnique({
-            where: {
-                token: token
-            }
-        });
-
-        if (!existingToken) {
-            res.status(400).json({ error: "Token has expired or is corrupted" });
-            return;
-        }
-        if (existingToken.expiresAt < new Date()) {
-            await prisma.token.delete({ where: { token: existingToken.token } });
-            res.status(400).json({ error: "Token has expired" });
-            return;
-        }
-
-        if (existingToken.customerPhone && existingToken.type == "verificationToken") {
-            authToken = signAccessToken({ Id: existingToken.customerPhone, role: "CUSTOMER" });
-            refreshToken = signRefreshToken({ Id: existingToken.customerPhone, role: "CUSTOMER" });
-            // Persist refresh Tokens
-            await prisma.token.create({
-                data:{
-                    token: refreshToken,
-                    customerPhone: existingToken.customerPhone,
-                    type: "refreshToken",
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-            });
-            await prisma.customers.update({
-                where:{
-                    phone: existingToken.customerPhone
-                },
-                data:{
-                    verified: true
-                }
-            });
-
-        } else if (existingToken.employeeEmail && existingToken.type == "verificationToken") {
-            authToken = signAccessToken({  Id: existingToken.employeeEmail, role: existingToken.employeeRole });
-            refreshToken = signRefreshToken({ Id: existingToken.employeeEmail, role: existingToken.employeeRole });
-            // Persist Refresh Token
-            await prisma.token.create({
-                data:{
-                    token: refreshToken,
-                    employeeEmail: existingToken.employeeEmail,
-                    employeeRole: existingToken.employeeRole,
-                    type: "refreshToken",
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-            });
-
-            await prisma.employees.update({
-                where:{
-                    email: existingToken.employeeEmail
-                },
-                data:{
-                    verified: true
-                }
-            });
-
-        } else {
-            res.status(400).json({ error: "Invalid token" });
-            return;
-        }
-
-        await prisma.token.delete({
-            where: {
-                token : existingToken.token
-            }
-        })
-        // Refresh token goes in an httpOnly cookie — JS on the client can't read it
-        res.cookie("refreshToken", refreshToken, {
-            httpOnly: true,
-            secure: true,       // HTTPS only
-            sameSite: "strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
-
-        res.status(200).json({ authToken });
-        return;
-
-
-    }catch (e) {
-    res.status(500).json({ error: "Failed to verify token" })
-    return;
-
-    }
-}
 export const refreshAccessToken = async (req: Request, res: Response): Promise<void> => {
     try {
         const refreshToken = req.cookies.refreshToken;
@@ -492,3 +508,4 @@ export const UpdateCustomerAccount = async(req: Request , res: Response) => {
         console.log(error)
     }
 };
+
