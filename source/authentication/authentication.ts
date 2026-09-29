@@ -22,7 +22,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
             where: {phone: customer.phone},
         });
         if (existingCustomer) {
-            res.status(400).json({ error: "Customer with this phone number already exists" });
+            res.status(400).json({ error: "Customer already exists" });
             return;
         }
         const newCustomer = await prisma.customers.create({
@@ -153,9 +153,10 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
         }
         
         if(channel == "sms")  {     
-            await createVerification(existingCustomer.phone)
-            res.status(200).json({message:"You need to verify first Buddy"})
-            console.log("You need to verify yourself")
+            const verify = await createVerification(existingCustomer.phone)
+            res.status(200).json({message:"Cool verify first Buddy"})
+            console.log("You need to verify yourself", verify)
+            return;
         };
              
        if (channel == "whatsapp") {
@@ -188,14 +189,11 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
              await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: "5"})// change expiresIn from string to number
              res.status(200).json({message:"code de vérification envoyé"})
          }
+             return;
              */
         };
 
-       if (!channel) {
-            res.status(403).json({message:" You need to specify channel"})
-            console.log("Specify Channel")
-       };
-    
+       
       res.status(200).json({message:"verification code sent" })
     }catch (error) {
         console.error("Error logging in customer:", error);
@@ -215,18 +213,14 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
                 return;
             }
            
-           const verify: any = await createVerificationCheck(phone , code);
+           const verify = await createVerificationCheck(phone , code);
         
           if (verify.status !== "approved") {
               res.status(403).json({message: "Wrong OTP or could not verify"});
               return;
            }
 
-              await prisma.customers.update({
-                  where: {phone},
-                  data: {verified: true},
-              }); 
-               
+
              const authToken = await signAccessToken({Id: phone , role:"CUSTOMER"})
              const refreshToken = await signRefreshToken({Id: phone, role:"CUSTOMER"})
 
@@ -249,6 +243,7 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
 
               res.status(200).json({message: "Customer verified" , authToken});
               console.log("Verification Was Successful")
+              return;
         };
 
       const existingToken = await prisma.token.findUnique({

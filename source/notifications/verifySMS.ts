@@ -11,6 +11,8 @@ export const createVerification = async (to: string ) => {
     });
 
   console.log(verification.status);
+
+  return verification
 };
 
 export const createVerificationCheck = async (to: string , code: string) => {
@@ -22,5 +24,7 @@ export const createVerificationCheck = async (to: string , code: string) => {
     });
 
   console.log(verificationCheck.status);
+
+  return verificationCheck
 }
 
