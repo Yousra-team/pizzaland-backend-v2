@@ -16,12 +16,11 @@ const orderItemSchema = z.object({
 });
 
 // ── Base fields shared by all order types ──
-// cashierEmail / employeeEmail are NOT here: the server takes them from the token.
-// customerPhone: ignored for customers (taken from the token); for staff it is the
-// customer's phone, or left out for a walk-in customer (pickup / dine-in only).
 const baseOrder = {
-    customerPhone: z.e164().optional(),
-    items:         z.array(orderItemSchema).min(1),
+    customerPhone: z.e164(), // The Cashier or Waiter can order on behalf of the customer
+    guestName: z.string().optional(),
+    guestPhone: z.e164().optional(),
+    items: z.array(orderItemSchema).min(1),
 };
 
 // ── Discriminated union: one parse validates everything ──
@@ -30,18 +29,19 @@ export const createOrderSchema = z.discriminatedUnion("orderType", [
         ...baseOrder,
         orderType: z.literal("pickup"),
         pickupTime: z.coerce.date(),
-        branchId: z.string().optional(), // required for customers: the branch they pick up from
+        branchId: z.string()
     }),
     z.object({
         ...baseOrder,
         orderType: z.literal("dineIn"),
-        table: z.string(),
+        tableId: z.string(), // optional for customers: the table they are seated at
         branchId: z.string().optional(), // required for customers: the branch they dine in
     }),
     z.object({
         ...baseOrder,
         orderType: z.literal("delivery"),
         // branch, delivery fee and estimated delivery time all come from the shipping address
+        details : z.string().optional(),
         shippingAddressName:   z.string(),
     }),
 ]);

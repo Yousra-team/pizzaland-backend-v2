@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-    createOrder, getOrdersByBranch, getMyOrders, updateOrder, deleteOrders,
+    placeOrder, getOrdersByBranch, getMyOrders, updateOrder, deleteOrders,
     dispatchOrder, updateOrderItemStatus,
 } from "./order.service.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
@@ -13,7 +13,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // CREATE: customers (app) and front-of-house staff (POS)
-router.post("/", roleMiddleware("CUSTOMER", "CASHIER", "WAITER", "MANAGER", "ADMIN"), createOrder);
+router.post("/", roleMiddleware("CUSTOMER", "CASHIER", "WAITER", "MANAGER", "ADMIN"), placeOrder);
 
 // GET
 router.get("/mine", roleMiddleware("CUSTOMER"), getMyOrders);   // ?view=history for finished orders

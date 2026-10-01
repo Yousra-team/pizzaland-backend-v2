@@ -239,15 +239,19 @@ model Favorites {
 }
 
 model Reviews {
-  id            String    @id @default(uuid())
-  customer      Customers @relation(fields: [customerPhone], references: [phone])
-  customerPhone String    @map("customer_phone")
-  product       Products  @relation(fields: [productId], references: [id])
-  productId     String    @map("product_id")
+  id            String      @id @default(uuid())
+  customer      Customers   @relation(fields: [customerPhone], references: [phone])
+  customerPhone String      @map("customer_phone")
+  product       Products?   @relation(fields: [productId], references: [id])
+  productId     String?     @map("product_id")
+  order         Orders?     @relation(fields: [orderNumber], references: [number])
+  orderNumber   String?
+  deliveries    Deliveries? @relation(fields: [deliveryId], references: [id])
+  deliveryId    String?
   rating        Int
   comment       String?
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
 
   @@index([customerPhone])
   @@index([productId])
@@ -347,7 +351,7 @@ model Products {
   imageUrl        String?           @map("Image URL")
   imagePath       String?           @map("Image Path")
   popularity      Int?
-  preparationTime Int?              @map("preparation_time")
+  preparationTime Int?              @map("Preparation Time")
   variants        ProductVariants[]
   menuItems       MenuItems[]
   orderItems      OrderItems[]
@@ -364,14 +368,15 @@ model Products {
 }
 
 model Addons {
-  id          String       @id @default(uuid())
-  name        String
-  description String?
-  imageUrl    String?      @map("Image URL")
-  imagePath   String?      @map("Image Path")
-  price       Float
-  Products    Products[]
-  orderItems  OrderItems[]
+  id              String       @id @default(uuid())
+  name            String
+  preparationTime Int?         @map("Preparation Time")
+  description     String?
+  imageUrl        String?      @map("Image URL")
+  imagePath       String?      @map("Image Path")
+  price           Float
+  Products        Products[]
+  orderItems      OrderItems[]
 
   @@index([name])
   @@map("Addons")
@@ -383,16 +388,16 @@ model Menu {
   description     String
   price           Float
   category        Category     @relation(fields: [categoryId], references: [id])
-  categoryId      String       @map("CATEGORY ID")
+  categoryId      String       @map("Category Id")
   subcategory     SubCategory  @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String       @map("SUB CATEGORY ID")
-  imageUrl        String?      @map("Image URL")
+  subCategoryId   String       @map("Sub Category Id")
+  imageUrl        String?      @map("Image Url")
   imagePath       String?      @map("Image Path")
-  preparationTime Int?         @map("Preparation Time min")
+  preparationTime Int?         @map("Preparation Time")
   items           MenuItems[]
   orderItems      OrderItems[]
-  createdAt       DateTime     @default(now()) @map("CREATED AT")
-  updatedAt       DateTime     @updatedAt @map("UPDATED AT")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -493,6 +498,8 @@ model Orders {
   customerPhone String?          @map("customer_phone") // null = walk-in customer
   employee      Employees?       @relation(name: "EmployeeOrders", fields: [employeeEmail], references: [email])
   employeeEmail String?          @map("employee_email")
+  guestName     String?          @map("Guest Name")
+  guestPhone    String?          @map("Guest Phone")
   discount      Float            @default(0)
   subtotal      Float            @map("subtotal")
   status        orderstatus      @default(pending)
@@ -504,6 +511,7 @@ model Orders {
   dineInOrders  DineInOrders[]
   Payments      Payments[]
   promotions    PromotionUsage[]
+  reviews       Reviews[]
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
@@ -547,12 +555,15 @@ model Deliveries {
   driver                Employees?        @relation(fields: [driverEmail], references: [email])
   driverEmail           String?           @map("driver_email")
   status                DeliveryStatus
+  details               String?           @map("Details")
   estimatedDeliveryTime DateTime?         @map("estimated_delivery_time")
   actualDeliveryTime    DateTime?         @map("actual_delivery_time")
   shippingAddress       ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
   shippingAddressName   String            @map("shipping_address_name")
   createdAt             DateTime          @default(now()) @map("created_at")
   updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  reviews Reviews[]
 
   @@index([orderNumber])
   @@index([driverEmail, status]) // a driver's active/history deliveries
@@ -576,7 +587,8 @@ model DineInOrders {
   id          String   @id @default(uuid())
   order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
-  table       String   @map("table_number")
+  table       Table?   @relation(fields: [tableId], references: [id])
+  tableId     String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -593,7 +605,7 @@ model Payments {
   orderNumber          String                @map("order_number")
   amount               Float
   method               paymentMethods
-  provider             String                @default("MonetBill")
+  provider             String
   status               String
   monetbillTransaction MonetbillTransaction?
   createdAt            DateTime              @default(now()) @map("created_at")
@@ -717,10 +729,12 @@ model PromotionUsage {
 
 model Table {
   id       String @id @default(uuid())
-  number   String @map("Number")
+  name     String @map("Name")
   floor    Floor  @relation(fields: [floorId], references: [id])
   floorId  String @map("Floor ID")
   capacity Int
+
+  dineIns DineInOrders[]
 }
 
 model Floor {

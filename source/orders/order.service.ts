@@ -3,280 +3,289 @@ import { prisma } from "../lib/prisma.js";
 import { Request, Response } from "express";
 import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
 import { fullOrderInclude } from "./order.include.js";
+import * as z from "zod";
+import { error } from "console";
 
-// An error we throw on purpose (bad input, wrong order state), carrying the HTTP status
-// and code to answer with. Anything else that fails is a real 500.
-class OrderError extends Error {
-    status: number;
-    code: string;
-    constructor(message: string, status: number, code: string) {
-        super(message);
-        this.status = status;
-        this.code = code;
-    }
-}
+// Helper Functions
+
 
 // CREATE ENDPOINTS
 
-// MAIN FUNCTION TO CREATE AN ENDPOINT
-export const createOrder = async (req: Request, res: Response): Promise<void> => {
-    // ── 1. Validate everything in one shot ──
-    const result = createOrderSchema.safeParse(req.body);
-    if (!result.success) {
-        res.status(400).json({
-            error: {
-                message: "Validation failed",
-                code: "VALIDATION_ERROR",
-                details: result.error.issues.map((issue) => ({
-                    field: issue.path.join("."),
-                    message: issue.message,
-                })),
-            },
-        });
-        return;
-    }
-
-    const data = result.data;
-    const user = req.user!;
-    const isCustomer = user.role === "CUSTOMER";
-
+// Place an Order
+export const placeOrder = async (req: Request, res: Response): Promise<void> => {
     try {
-        const order = await prisma.$transaction(async (tx) => {
-
-            // ── 2. Who is the customer? ──
-            // Customers order for themselves (phone from the token). Staff enter the
-            // customer's phone, or leave it out for a walk-in customer.
-            const customerPhone = isCustomer ? user.Id : data.customerPhone;
-
-            if (!customerPhone && data.orderType === "delivery") {
-                throw new OrderError("A customer phone is required for delivery orders", 400, "CUSTOMER_REQUIRED");
-            }
-            if (!isCustomer && customerPhone) {
-                const customer = await tx.customers.findUnique({
-                    where: { phone: customerPhone },
-                    select: { phone: true },
-                });
-                if (!customer) {
-                    throw new OrderError(`Customer ${customerPhone} not found`, 400, "CUSTOMER_NOT_FOUND");
-                }
-            }
-
-            // ── 3. Derive branchId (+ delivery fee and time for deliveries) ──
-            let branchId: string;
-            let deliveryFee = 0;
-            let deliveryTime = 0; // minutes
-
-            if (data.orderType === "delivery") {
-                // Shipping address belongs to exactly one branch
-                const address = await tx.shippingAddresses.findUnique({
-                    where: { name: data.shippingAddressName },
-                    select: { branchId: true, deliveryFee: true, deliveryTime: true },
-                });
-                if (!address) {
-                    throw new OrderError(`Shipping address "${data.shippingAddressName}" not found`, 400, "ADDRESS_NOT_FOUND");
-                }
-                branchId = address.branchId;
-                deliveryFee = address.deliveryFee;
-                deliveryTime = address.deliveryTime;
-
-            } else if (isCustomer) {
-                // dineIn or pickup by a customer — the branch they selected
-                if (!data.branchId) {
-                    throw new OrderError("Please select a branch", 400, "BRANCH_REQUIRED");
-                }
-                const branch = await tx.branches.findUnique({
-                    where: { id: data.branchId },
-                    select: { id: true },
-                });
-                if (!branch) {
-                    throw new OrderError("Branch not found", 400, "BRANCH_NOT_FOUND");
-                }
-                branchId = branch.id;
-
-            } else {
-                // dineIn or pickup by staff — the employee's own branch
-                const employee = await tx.employees.findUnique({
-                    where: { email: user.userId },
-                    select: { branchId: true },
-                });
-                if (!employee?.branchId) {
-                    throw new OrderError("You are not assigned to any branch", 403, "NO_BRANCH");
-                }
-                branchId = employee.branchId;
-            }
-
-            // ── 4. Look up prices server-side (never trust client) ──
-            const productIds = data.items
-                .filter((i) => i.type === "product" && i.productId)
-                .map((i) => i.productId!);
-
-            const menuIds = data.items
-                .filter((i) => i.type === "menu" && i.menuId)
-                .map((i) => i.menuId!);
-
-            const addonIds = data.items
-                .filter((i) => i.type === "addons" && i.addonId)
-                .map((i) => i.addonId!);
-
-            const [products, menus, addons] = await Promise.all([
-                productIds.length
-                    ? tx.products.findMany({
-                        where: { id: { in: productIds } },
-                        select: { id: true, name: true, price: true, variants: { select: { id: true, price: true } } },
-                    })
-                    : [],
-                menuIds.length
-                    ? tx.menu.findMany({ where: { id: { in: menuIds } } })
-                    : [],
-                addonIds.length
-                    ? tx.addons.findMany({ where: { id: { in: addonIds } } })
-                    : [],
-            ]);
-
-            const productMap = new Map(products.map((p) => [p.id, p]));
-            const menuPriceMap = new Map(menus.map((m) => [m.id, m.price]));
-            const addonPriceMap = new Map(addons.map((a) => [a.id, a.price]));
-
-            // ── 5. Build order items with server-derived prices ──
-            const orderItems = data.items.map((item) => {
-                let price: number;
-                let productVariantId: string | null = null;
-
-                if (item.type === "product") {
-                    const product = productMap.get(item.productId!);
-                    if (!product) throw new OrderError(`Product ${item.productId} not found`, 400, "INVALID_ITEM");
-
-                    if (product.variants.length === 0) {
-                        // No variants: base price
-                        price = product.price;
-                    } else {
-                        // Has variants: the customer must choose one, and pays its price
-                        const variant = product.variants.find((v) => v.id === item.productVariantId);
-                        if (!variant) throw new OrderError(`Please choose a valid variant for "${product.name}"`, 400, "INVALID_VARIANT");
-                        price = variant.price;
-                        productVariantId = variant.id;
-                    }
-                } else if (item.type === "menu") {
-                    const menuPrice = menuPriceMap.get(item.menuId!);
-                    if (menuPrice === undefined) throw new OrderError(`Menu ${item.menuId} not found`, 400, "INVALID_ITEM");
-                    price = menuPrice;
-                } else {
-                    const addonPrice = addonPriceMap.get(item.addonId!);
-                    if (addonPrice === undefined) throw new OrderError(`Addon ${item.addonId} not found`, 400, "INVALID_ITEM");
-                    price = addonPrice;
-                }
-
-                return {
-                    productId: item.type === "product" ? item.productId! : null,
-                    productVariantId,
-                    menuId: item.type === "menu" ? item.menuId! : null,
-                    addonId: item.type === "addons" ? item.addonId! : null,
-                    quantity: item.quantity,
-                    price,
-                    type: item.type,
-                    status: "pending" as const,
-                    estimatedReadyAt: new Date(), // TODO: compute from product.preparationTime
-                };
-            });
-
-            // ── 6. Compute totals ──
-            const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-            const discount = 0; // TODO: compute from promotions
-            const total = subtotal - discount + deliveryFee; // deliveryFee is 0 for pickup / dine-in
-
-            // ── 7. Create the order ──
-            // Staff who create the order are recorded from their token: cashiers as
-            // cashierEmail, any other employee (e.g. a waiter) as employeeEmail
-            const newOrder = await tx.orders.create({
-                data: {
-                    branchId,
-                    customerPhone, // undefined = walk-in customer
-                    cashierEmail: user.role === "CASHIER" ? user.userId : undefined,
-                    employeeEmail: !isCustomer && user.role !== "CASHIER" ? user.userId : undefined,
-                    discount,
-                    subtotal,
-                    total,
-                    orderType: data.orderType,
-                    status: "pending",
-                },
-            });
-
-            // ── 6. Create order items ──
-            await tx.orderItems.createMany({
-                data: orderItems.map((item) => ({
-                    ...item,
-                    orderNumber: newOrder.number,
-                })),
-            });
-
-            // ── 7. Create type-specific record ──
-            if (data.orderType === "pickup") {
-                await tx.pickupOrders.create({
-                    data: {
-                        orderNumber: newOrder.number,
-                        pickupTime: data.pickupTime,
-                    },
-                });
-            } else if (data.orderType === "dineIn") {
-                await tx.dineInOrders.create({
-                    data: {
-                        orderNumber: newOrder.number,
-                        table: data.table,
-                    },
-                });
-            } else if (data.orderType === "delivery") {
-                await tx.deliveries.create({
-                    data: {
-                        orderNumber: newOrder.number,
-                        shippingAddressName: data.shippingAddressName,
-                        // now + the address's delivery time (minutes)
-                        estimatedDeliveryTime: new Date(Date.now() + deliveryTime * 60 * 1000),
-                        status: "pending",
-                    },
-                });
-            }
-
-        return tx.orders.findUniqueOrThrow({
-            where: { number: newOrder.number },
-            include: fullOrderInclude,
-        });
-    
-        });
-
-        res.status(201).json({ data: order });
-    } catch (err: any) {
-        console.error("createOrder transaction failed:", err);
-
-        if (err instanceof OrderError) {
-            res.status(err.status).json({ error: { message: err.message, code: err.code } });
+        // Step 1: validate the request body
+        const result = createOrderSchema.safeParse(req.body);
+        if (!result.success) {
+            const fieldErrors = z.flattenError(result.error);
+            res.status(400).json({ message: "Invalid Schema", error: fieldErrors.fieldErrors });
             return;
         }
 
-        res.status(500).json({
-            error: { message: "Failed to create order", code: "ORDER_CREATE_FAILED" },
+        const data = result.data;
+
+        // Step 2: find out who is ordering
+        let actor: string;
+
+        if (!req.user) {
+            actor = "GUEST";
+        } else if (req.user.role === "CUSTOMER") {
+            actor = "CUSTOMER";
+        } else if (data.customerPhone) {
+            actor = "STAFF";      // staff ordering on behalf of a customer
+        } else {
+            actor = "EMPLOYEE";   // staff ordering for themselves
+        }
+
+        // Step 3: everything below runs in one transaction
+        const newOrder = await prisma.$transaction(async (tx) => {
+
+            // Step 4: loop through the items, get prices and prep times
+            let subtotal = 0;
+            let longestPrepTime = 0;
+            const itemsToCreate = [];
+
+            for (const item of data.items) {
+                let price: number | undefined;
+                let prepTime = 0;
+
+                if (item.type === "product") {
+                    const product = await tx.products.findUnique({
+                        where: { id: item.productId! },
+                        select: { price: true, preparationTime: true },
+                    });
+                    if (!product) {
+                        throw new Error("Product not found");
+                    }
+                    price = product.price;
+                    prepTime = product.preparationTime ?? 0;
+
+                    if (item.productVariantId) {
+                        const variant = await tx.productVariants.findUnique({
+                            where: { id: item.productVariantId },
+                            select: { price: true, productId: true },
+                        });
+                        if (!variant || variant.productId !== item.productId) {
+                            throw new Error("Variant does not belong to this product");
+                        }
+                        price = variant.price;
+                    }
+                }
+
+                if (item.type === "menu") {
+                    const menu = await tx.menu.findUnique({
+                        where: { id: item.menuId! },
+                        select: {
+                            price: true,
+                            items: { select: { product: { select: { preparationTime: true } } } },
+                        },
+                    });
+                    if (!menu) {
+                        throw new Error("Menu not found");
+                    }
+                    price = menu.price;
+                    for (const menuItem of menu.items) {
+                        const productTime = menuItem.product.preparationTime ?? 0;
+                        if (productTime > prepTime) {
+                            prepTime = productTime;
+                        }
+                    }
+                }
+
+                if (item.type === "addons") {
+                    const addon = await tx.addons.findUnique({
+                        where: { id: item.addonId! },
+                        select: { price: true },
+                    });
+                    if (!addon) {
+                        throw new Error("Addon not found");
+                    }
+                    price = addon.price;
+                }
+
+                if (price === undefined) {
+                    throw new Error(`Price not found for item type ${item.type}`);
+                }
+
+                subtotal += price * item.quantity;
+
+                if (prepTime > longestPrepTime) {
+                    longestPrepTime = prepTime;
+                }
+
+                // Save this item's data, we create it after the order exists
+                itemsToCreate.push({
+                    productId: item.productId,
+                    menuId: item.menuId,
+                    quantity: item.quantity,
+                    price: price,
+                    type: item.type,
+                    status: "pending" as const,
+                    estimatedReadyAt: new Date(Date.now() + prepTime * 60 * 1000),
+                });
+            }
+
+            // Round to avoid floating point issues
+            subtotal = Math.round(subtotal);
+
+            // Step 5: find the branch, delivery fee and estimated delivery time
+            let deliveryFee = 0;
+            let estimatedDeliveryTime: Date | null = null;
+            let branchId: string;
+
+            if (data.orderType === "delivery") {
+                const shippingAddress = await tx.shippingAddresses.findUnique({
+                    where: { name: data.shippingAddressName },
+                    select: { deliveryFee: true, deliveryTime: true, branchId: true },
+                });
+
+                if (!shippingAddress) {
+                    throw new Error("Shipping address not found");
+                }
+
+                deliveryFee = shippingAddress.deliveryFee;
+                branchId = shippingAddress.branchId;
+
+                // kitchen time + delivery time = total minutes
+                const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
+                estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
+            } else if (data.orderType === "pickup") {
+                branchId = data.branchId;
+            } else {
+                if (!data.branchId) {
+                    throw new Error("branchId is required for dine-in orders");
+                }
+                branchId = data.branchId;
+            }
+
+            // Step 6: totals (promotions will come later)
+            const discount = 0;
+            const total = subtotal - discount + deliveryFee;
+
+            // Step 7: work out who the order belongs to
+            let customerPhone: string | undefined;
+            let employeeEmail: string | undefined;
+            let guestName: string | undefined;
+
+            if (actor === "CUSTOMER") {
+                customerPhone = req.user?.userId;
+                if (!customerPhone) {
+                    throw new Error("Customer phone not found");
+                }
+            } else if (actor === "STAFF") {
+                customerPhone = data.customerPhone;
+                employeeEmail = req.user?.userId;
+            } else if (actor === "EMPLOYEE") {
+                employeeEmail = req.user?.userId;
+                if (!employeeEmail) {
+                    throw new Error("Employee email not found");
+                }
+            } else {
+                guestName = data.guestName;
+            }
+
+            // Step 8: create the order ONCE
+            const order = await tx.orders.create({
+                data: {
+                    branchId: branchId,
+                    customerPhone: customerPhone,
+                    employeeEmail: employeeEmail,
+                    guestName: guestName,
+                    discount: discount,
+                    subtotal: subtotal,
+                    total: total,
+                    status: "pending",
+                    orderType: data.orderType,
+                },
+            });
+
+            // Step 9: create the order items
+            for (const item of itemsToCreate) {
+                await tx.orderItems.create({
+                    data: {
+                        orderNumber: order.number,
+                        productId: item.productId,
+                        menuId: item.menuId,
+                        quantity: item.quantity,
+                        price: item.price,
+                        type: item.type,
+                        status: item.status,
+                        estimatedReadyAt: item.estimatedReadyAt,
+                    },
+                });
+            }
+
+            // Step 10: create the extra row depending on the order type
+            if (data.orderType === "delivery") {
+                if (!estimatedDeliveryTime) {
+                    throw new Error("Estimated delivery time missing");
+                }
+                await tx.deliveries.create({
+                    data: {
+                        orderNumber: order.number,
+                        shippingAddressName: data.shippingAddressName,
+                        status: "pending",
+                        estimatedDeliveryTime: estimatedDeliveryTime,
+                    },
+                });
+            }
+
+            if (data.orderType === "pickup") {
+                await tx.pickupOrders.create({
+                    data: {
+                        orderNumber: order.number,
+                        pickupTime: data.pickupTime,
+                    },
+                });
+            }
+
+            if (data.orderType === "dineIn") {
+               const table = await tx.table.findUnique({
+              where: { id: data.tableId },
+               });
+
+                if (!table) {
+                  throw new Error("Table not found");
+               }
+
+               await tx.dineInOrders.create({
+                    data: {
+                      orderNumber: order.number,
+                    tableId: data.tableId,
+           },
+         });
+}
+
+            return order;
         });
+
+        // Step 11: send the result
+        res.status(201).json(newOrder);
+
+    } catch (error) {
+        console.error("Error placing order:", error);
+        res.status(500).json({ error: "Failed to place order" });
     }
 };
+
 // GET ENDPOINTS
 
 // GET ALL ORDERS FROM YOUR BRANCH ACCORDING TO A STATUS OR ALL ORDERS FROM YOUR BRANCH
 export const getOrdersByBranch = async (req: Request, res: Response): Promise<void> => {
-    const email = req.user?.userId;
-    const result = orderStatusQuerySchema.safeParse(req.query);
-
-    if (!result.success) {
-        res.status(400).json({
-            error: {
-                message: "Validation failed",
-                code: "VALIDATION_ERROR",
-                details: result.error.issues.map((i) => ({
-                    field: i.path.join("."),
-                    message: i.message,
-                })),
-            },
-        });
+    
+    if(!req.user || req.user.role === "CUSTOMER") {
+        res.status(401).json({message:"Only An employee from Pizzaland Can Access this Endpoint"})
         return;
     }
+
+    const email = req.user.id
+    const result = orderStatusQuerySchema.safeParse(req.query);
+
+     if(!result.data) {
+        const fieldErrors = z.flattenError(result.error)
+        res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
+        return;
+     }
 
     const { status } = result.data;
 
@@ -287,13 +296,13 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
         });
 
         if (!employee) {
-            res.status(401).json({ error: { message: "Unauthorized", code: "UNAUTHORIZED" } });
+            res.status(401).json({message:"There is no employee found here"});
             return;
         }
 
         if (!employee.branchId) {
             res.status(400).json({
-                error: { message: "Employee is not assigned to a branch", code: "NO_BRANCH_ASSIGNED" },
+                error: { message: "Employee is not assigned to a branch"},
             });
             return;
         }
