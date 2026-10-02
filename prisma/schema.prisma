@@ -297,6 +297,7 @@ model Branches {
   stations          Stations[]
   orders            Orders[]
   reservations      Reservations[]
+  floors            Floor[]
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
 
@@ -351,7 +352,7 @@ model Products {
   imageUrl        String?           @map("Image URL")
   imagePath       String?           @map("Image Path")
   popularity      Int?
-  preparationTime Int?              @map("Preparation Time")
+  preparationTime Int?              @map("preparation_time")
   variants        ProductVariants[]
   menuItems       MenuItems[]
   orderItems      OrderItems[]
@@ -388,16 +389,16 @@ model Menu {
   description     String
   price           Float
   category        Category     @relation(fields: [categoryId], references: [id])
-  categoryId      String       @map("Category Id")
+  categoryId      String       @map("CATEGORY ID")
   subcategory     SubCategory  @relation(fields: [subCategoryId], references: [id])
-  subCategoryId   String       @map("Sub Category Id")
-  imageUrl        String?      @map("Image Url")
+  subCategoryId   String       @map("SUB CATEGORY ID")
+  imageUrl        String?      @map("Image URL")
   imagePath       String?      @map("Image Path")
-  preparationTime Int?         @map("Preparation Time")
+  preparationTime Int?         @map("Preparation Time min")
   items           MenuItems[]
   orderItems      OrderItems[]
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt       DateTime     @default(now()) @map("CREATED AT")
+  updatedAt       DateTime     @updatedAt @map("UPDATED AT")
 
   @@index([categoryId])
   @@index([subCategoryId])
@@ -556,6 +557,7 @@ model Deliveries {
   driverEmail           String?           @map("driver_email")
   status                DeliveryStatus
   details               String?           @map("Details")
+  fee                   Float             @map("Fee") @default(0)
   estimatedDeliveryTime DateTime?         @map("estimated_delivery_time")
   actualDeliveryTime    DateTime?         @map("actual_delivery_time")
   shippingAddress       ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
@@ -740,6 +742,8 @@ model Table {
 model Floor {
   id   String @id @default(uuid())
   name String @map("Name")
+  branch Branches @relation(fields: [branchId], references: [id])
+  branchId String @map("Branch ID")
 
   tables Table[]
 }

@@ -17,7 +17,7 @@ const orderItemSchema = z.object({
 
 // ── Base fields shared by all order types ──
 const baseOrder = {
-    customerPhone: z.e164(), // The Cashier or Waiter can order on behalf of the customer
+    customerPhone: z.e164().optional(), // The Cashier or Waiter can order on behalf of the customer
     guestName: z.string().optional(),
     guestPhone: z.e164().optional(),
     items: z.array(orderItemSchema).min(1),

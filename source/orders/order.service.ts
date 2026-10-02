@@ -4,7 +4,7 @@ import { Request, Response } from "express";
 import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
 import { fullOrderInclude } from "./order.include.js";
 import * as z from "zod";
-import { error } from "console";
+
 
 // Helper Functions
 
@@ -27,9 +27,7 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
         // Step 2: find out who is ordering
         let actor: string;
 
-        if (!req.user) {
-            actor = "GUEST";
-        } else if (req.user.role === "CUSTOMER") {
+        if (req.user.role === "CUSTOMER") {
             actor = "CUSTOMER";
         } else if (data.customerPhone) {
             actor = "STAFF";      // staff ordering on behalf of a customer
@@ -73,24 +71,17 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 }
 
                 if (item.type === "menu") {
-                    const menu = await tx.menu.findUnique({
-                        where: { id: item.menuId! },
-                        select: {
-                            price: true,
-                            items: { select: { product: { select: { preparationTime: true } } } },
-                        },
-                    });
-                    if (!menu) {
-                        throw new Error("Menu not found");
-                    }
-                    price = menu.price;
-                    for (const menuItem of menu.items) {
-                        const productTime = menuItem.product.preparationTime ?? 0;
-                        if (productTime > prepTime) {
-                            prepTime = productTime;
-                        }
-                    }
-                }
+                  const menu = await tx.menu.findUnique({
+                         where: { id: item.menuId! },
+                         select: { price: true, preparationTime: true },
+                         });
+                         if (!menu) {
+                          throw new Error("Menu not found");
+                       }
+                      price = menu.price;
+                      prepTime = menu.preparationTime ?? 0;
+                    
+                 }
 
                 if (item.type === "addons") {
                     const addon = await tx.addons.findUnique({
@@ -149,8 +140,17 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 // kitchen time + delivery time = total minutes
                 const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
                 estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
-            } else if (data.orderType === "pickup") {
-                branchId = data.branchId;
+            } else if (data.orderType === "dineIn") {
+                 const table = await tx.table.findUnique({
+                    where: { id: data.tableId },
+                    select: { floorId: true , floor: { select: { branchId: true } } },
+                });
+
+                    if (!table) {
+                    throw new Error("Table not found");
+                    }
+
+                    branchId = table.floor.branchId;
             } else {
                 if (!data.branchId) {
                     throw new Error("branchId is required for dine-in orders");
@@ -168,15 +168,15 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             let guestName: string | undefined;
 
             if (actor === "CUSTOMER") {
-                customerPhone = req.user?.userId;
+                customerPhone = req.user.Id;
                 if (!customerPhone) {
                     throw new Error("Customer phone not found");
                 }
             } else if (actor === "STAFF") {
                 customerPhone = data.customerPhone;
-                employeeEmail = req.user?.userId;
+                employeeEmail = req.user.Id;
             } else if (actor === "EMPLOYEE") {
-                employeeEmail = req.user?.userId;
+                employeeEmail = req.user.Id;
                 if (!employeeEmail) {
                     throw new Error("Employee email not found");
                 }
@@ -268,6 +268,234 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
     }
 };
 
+export const GuestplaceOrder = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Step 1: validate the request body (guest name and phone are checked here)
+        const result = createOrderSchema.safeParse(req.body);
+        if (!result.success) {
+            const fieldErrors = z.flattenError(result.error);
+            res.status(400).json({ message: "Invalid Schema", error: fieldErrors.fieldErrors });
+            return;
+        }
+
+        const data = result.data;
+
+        // Step 2: everything below runs in one transaction
+        const newOrder = await prisma.$transaction(
+            async (tx) => {
+
+                // Step 3: loop through the items, get prices and prep times
+                let subtotal = 0;
+                let longestPrepTime = 0;
+                const itemsToCreate = [];
+
+                for (const item of data.items) {
+                    let price: number | undefined;
+                    let prepTime = 0;
+
+                    if (item.type === "product") {
+                        const product = await tx.products.findUnique({
+                            where: { id: item.productId! },
+                            select: { price: true, preparationTime: true },
+                        });
+                        if (!product) {
+                            throw new Error("Product not found");
+                        }
+                        price = product.price;
+                        prepTime = product.preparationTime ?? 0;
+
+                        if (item.productVariantId) {
+                            const variant = await tx.productVariants.findUnique({
+                                where: { id: item.productVariantId },
+                                select: { price: true, productId: true },
+                            });
+                            if (!variant || variant.productId !== item.productId) {
+                                throw new Error("Variant does not belong to this product");
+                            }
+                            price = variant.price;
+                        }
+                    }
+
+                    if (item.type === "menu") {
+                        const menu = await tx.menu.findUnique({
+                            where: { id: item.menuId! },
+                            select: { price: true, preparationTime: true },
+                        });
+                        if (!menu) {
+                            throw new Error("Menu not found");
+                        }
+                        price = menu.price;
+                        prepTime = menu.preparationTime ?? 0;
+                    }
+
+                    if (item.type === "addons") {
+                        const addon = await tx.addons.findUnique({
+                            where: { id: item.addonId! },
+                            select: { price: true },
+                        });
+                        if (!addon) {
+                            throw new Error("Addon not found");
+                        }
+                        price = addon.price;
+                    }
+
+                    if (price === undefined) {
+                        throw new Error(`Price not found for item type ${item.type}`);
+                    }
+
+                    subtotal += price * item.quantity;
+
+                    if (prepTime > longestPrepTime) {
+                        longestPrepTime = prepTime;
+                    }
+
+                    itemsToCreate.push({
+                        productId: item.productId,
+                        menuId: item.menuId,
+                        quantity: item.quantity,
+                        price: price,
+                        type: item.type,
+                        status: "pending" as const,
+                        estimatedReadyAt: new Date(Date.now() + prepTime * 60 * 1000),
+                    });
+                }
+
+                subtotal = Math.round(subtotal);
+
+                // Step 4: find the branch, delivery fee and estimated delivery time
+                let deliveryFee = 0;
+                let estimatedDeliveryTime: Date | null = null;
+                let branchId: string ;
+
+                if (data.orderType === "delivery") {
+                    const shippingAddress = await tx.shippingAddresses.findUnique({
+                        where: { name: data.shippingAddressName },
+                        select: { deliveryFee: true, deliveryTime: true, branchId: true },
+                    });
+
+                    if (!shippingAddress) {
+                        throw new Error("Shipping address not found");
+                    }
+
+                    deliveryFee = shippingAddress.deliveryFee;
+                    branchId = shippingAddress.branchId;
+
+                    const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
+                    estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
+                } else if (data.orderType === "dineIn") {
+                    const table = await tx.table.findUnique({
+                    where: { id: data.tableId },
+                    select: { floorId: true , floor: { select: { branchId: true } } },
+                });
+
+                    if (!table) {
+                    throw new Error("Table not found");
+                    }
+
+                    branchId = table.floor.branchId;
+                } 
+                
+                else{
+                    // pickup and dineIn both send a branchId
+                    if(!data.branchId) {
+                        res.status(400).json({ message: "branchId is required for pickup and dineIn orders" });
+                        return;
+                    }
+                    branchId = data.branchId;
+                }
+
+                // Step 5: totals (promotions will come later)
+                const discount = 0;
+                const total = subtotal - discount + deliveryFee;
+
+                // Step 6: create the order ONCE
+                const order = await tx.orders.create({
+                    data: {
+                        branchId: branchId,
+                        guestName: data.guestName,
+                        guestPhone: data.guestPhone,
+                        discount: discount,
+                        subtotal: subtotal,
+                        total: total,
+                        status: "pending",
+                        orderType: data.orderType,
+                    },
+                });
+
+                // Step 7: create the order items
+                for (const item of itemsToCreate) {
+                    await tx.orderItems.create({
+                        data: {
+                            orderNumber: order.number,
+                            productId: item.productId,
+                            menuId: item.menuId,
+                            quantity: item.quantity,
+                            price: item.price,
+                            type: item.type,
+                            status: item.status,
+                            estimatedReadyAt: item.estimatedReadyAt,
+                        },
+                    });
+                }
+
+                // Step 8: create the extra row depending on the order type
+                if (data.orderType === "delivery") {
+                    if (!estimatedDeliveryTime) {
+                        throw new Error("Estimated delivery time missing");
+                    }
+                    await tx.deliveries.create({
+                        data: {
+                            orderNumber: order.number,
+                            shippingAddressName: data.shippingAddressName,
+                            status: "pending",
+                            estimatedDeliveryTime: estimatedDeliveryTime,
+                        },
+                    });
+                }
+
+                if (data.orderType === "pickup") {
+                    await tx.pickupOrders.create({
+                        data: {
+                            orderNumber: order.number,
+                            pickupTime: data.pickupTime,
+                        },
+                    });
+                }
+
+                if (data.orderType === "dineIn") {
+                    const table = await tx.table.findUnique({
+                        where: { id: data.tableId },
+                    });
+
+                    if (!table) {
+                        throw new Error("Table not found");
+                    }
+
+                    await tx.dineInOrders.create({
+                        data: {
+                            orderNumber: order.number,
+                            tableId: data.tableId,
+                        },
+                    });
+                }
+
+                return order;
+            },
+            {
+                maxWait: 10000,
+                timeout: 20000,
+            }
+        );
+
+        // Step 9: send the result
+        res.status(201).json(newOrder);
+
+    } catch (error) {
+        console.error("Error placing guest order:", error);
+        res.status(500).json({ error: "Failed to place order" });
+    }
+};
+
 // GET ENDPOINTS
 
 // GET ALL ORDERS FROM YOUR BRANCH ACCORDING TO A STATUS OR ALL ORDERS FROM YOUR BRANCH
@@ -278,7 +506,7 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
         return;
     }
 
-    const email = req.user.id
+    const email = req.user.Id
     const result = orderStatusQuerySchema.safeParse(req.query);
 
      if(!result.data) {
@@ -333,7 +561,7 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
 const FINAL_STATUSES = ["successful", "delivered", "cancelled"] as const;
 
 export const getMyOrders = async (req: Request, res: Response): Promise<void> => {
-    const phone = req.user?.userId;
+    const phone = req.user.Id;
 
     if (!phone) {
         res.status(401).json({ error: { message: "Please login", code: "UNAUTHORIZED" } });
@@ -377,19 +605,12 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
     return;
   }
 
-    if (!result.success) {
-        res.status(400).json({
-            error: {
-                message: "Validation failed",
-                code: "VALIDATION_ERROR",
-                details: result.error.issues.map((i) => ({
-                    field: i.path.join("."),
-                    message: i.message,
-                })),
-            },
-        });
+   if(!result.data) {
+        const fieldErrors = z.flattenError(result.error)
+        res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
         return;
-    }
+     }
+    
 
     const data = result.data;
 
@@ -423,7 +644,7 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
             let totalUpdate = {};
             if (baseFields.discount !== undefined) {
                 if (baseFields.discount > existing.subtotal) {
-                    throw new OrderError("Discount cannot be more than the subtotal", 400, "INVALID_DISCOUNT");
+                    throw new Error("Discount cannot be more than the subtotal");
                 }
                 totalUpdate = { total: existing.total + existing.discount - baseFields.discount };
             }
@@ -477,15 +698,6 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
         res.status(200).json({ data: order });
     } catch (err: any) {
         console.error("updateOrder failed:", err);
-
-        if (err instanceof OrderError) {
-            res.status(err.status).json({ error: { message: err.message, code: err.code } });
-            return;
-        }
-        if (err.message === "Order not found") {
-            res.status(404).json({ error: { message: "Order not found", code: "NOT_FOUND" } });
-            return;
-        }
         res.status(500).json({
             error: { message: "Failed to update order", code: "ORDER_UPDATE_FAILED" },
         });
@@ -498,19 +710,12 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
 export const deleteOrders = async (req: Request, res: Response): Promise<void> => {
     const result = deleteOrderSchema.safeParse(req.body);
 
-    if (!result.success) {
-        res.status(400).json({
-            error: {
-                message: "Validation failed",
-                code: "VALIDATION_ERROR",
-                details: result.error.issues.map((i) => ({
-                    field: i.path.join("."),
-                    message: i.message,
-                })),
-            },
-        });
+
+      if(!result.data) {
+        const fieldErrors = z.flattenError(result.error)
+        res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
         return;
-    }
+     }
 
     const { numbers } = result.data;
 
@@ -675,7 +880,7 @@ export const dispatchOrder = async (req: Request, res: Response): Promise<void> 
                 data: { status: "kitchen" },
             });
             if (updated.count === 0) {
-                throw new OrderError(`Order cannot be dispatched while it is "${order.status}"`, 409, "INVALID_STATUS");
+                throw new Error (`Order cannot be dispatched while it is "${order.status}"`);
             }
 
             await tx.orderItems.updateMany({
@@ -694,15 +899,6 @@ export const dispatchOrder = async (req: Request, res: Response): Promise<void> 
 
     } catch (err: any) {
         console.error("dispatchOrder failed:", err);
-
-        if (err instanceof OrderError) {
-            res.status(err.status).json({ error: { message: err.message, code: err.code } });
-            return;
-        }
-        if (err.message?.includes("no station")) {
-            res.status(400).json({ error: { message: err.message, code: "MISSING_STATION" } });
-            return;
-        }
         res.status(500).json({
             error: { message: "Failed to dispatch order", code: "DISPATCH_FAILED" },
         });
