@@ -592,118 +592,231 @@ export const getMyOrders = async (req: Request, res: Response): Promise<void> =>
     }
 };
 
-
-
-// UPDATE ENDPOINT :
+// Update Order endpoint
 export const updateOrder = async (req: Request, res: Response): Promise<void> => {
-    const result = updateOrderSchema.safeParse(req.body);
-
-    const number = req.params.number;
-
-   if (typeof number !== "string") {
-    res.status(400).json({ error: { message: "Invalid order number", code: "INVALID_PARAM" } });
-    return;
-  }
-
-   if(!result.data) {
-        const fieldErrors = z.flattenError(result.error)
-        res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
-        return;
-     }
-    
-
-    const data = result.data;
-
-    // Reject empty updates
-    if (Object.values(data).every((v) => v === undefined)) {
-        res.status(400).json({
-            error: { message: "No fields provided to update", code: "EMPTY_UPDATE" },
-        });
-        return;
-    }
-
     try {
-        const order = await prisma.$transaction(async (tx) => {
-            // ── 1. Verify order exists and get its type ──
-            const existing = await tx.orders.findUnique({
-                where: { number },
-                select: { orderType: true, subtotal: true, discount: true, total: true },
+        // Step 1: only staff can update orders
+        if (!req.user || req.user.role === "CUSTOMER") {
+            res.status(403).json({ error: "Only staff can update orders" });
+            return;
+        }
+
+        // Step 2: get the order number from the URL
+        const number = req.params.number;
+
+        if (typeof number !== "string") {
+            res.status(400).json({ error: "Invalid order number" });
+            return;
+        }
+
+        // Step 3: check the request body
+        const result = updateOrderSchema.safeParse(req.body);
+        if (!result.success) {
+            const fieldErrors = z.flattenError(result.error);
+            res.status(400).json({ message: "Wrong Input Values", error: fieldErrors.fieldErrors });
+            return;
+        }
+
+        const data = result.data;
+
+        // Step 4: reject an update with nothing in it
+        if (Object.values(data).every((v) => v === undefined)) {
+            res.status(400).json({ error: "No fields provided to update" });
+            return;
+        }
+
+        // Step 5: find the order
+        const existing = await prisma.orders.findUnique({
+            where: { number: number },
+            select: { orderType: true, subtotal: true, discount: true, total: true },
+        });
+
+        if (!existing) {
+            res.status(404).json({ error: "Order not found" });
+            return;
+        }
+
+        // Step 6: the fields the client sent
+        const status = data.status;
+        const discount = data.discount;
+        const employeeEmail = data.employeeEmail;
+        const pickupTime = data.pickupTime;
+        const tableId = data.tableId;
+        const driverEmail = data.driverEmail;
+        const estimatedDeliveryTime = data.estimatedDeliveryTime;
+        const actualDeliveryTime = data.actualDeliveryTime;
+        const deliveryStatus = data.deliveryStatus;
+
+        // Step 7: the fields must match the order type
+        if (pickupTime !== undefined && existing.orderType !== "pickup") {
+            res.status(400).json({ error: "pickupTime only applies to pickup orders" });
+            return;
+        }
+
+        if (tableId !== undefined && existing.orderType !== "dineIn") {
+            res.status(400).json({ error: "tableId only applies to dine-in orders" });
+            return;
+        }
+
+        let hasDeliveryField = false;
+        if (driverEmail !== undefined) hasDeliveryField = true;
+        if (estimatedDeliveryTime !== undefined) hasDeliveryField = true;
+        if (actualDeliveryTime !== undefined) hasDeliveryField = true;
+        if (deliveryStatus !== undefined) hasDeliveryField = true;
+
+        if (hasDeliveryField && existing.orderType !== "delivery") {
+            res.status(400).json({ error: "Delivery fields only apply to delivery orders" });
+            return;
+        }
+
+        // Step 8: check that the employee, driver and table exist
+        if (employeeEmail !== undefined) {
+            const employee = await prisma.employees.findUnique({
+                where: { email: employeeEmail },
             });
-
-            if (!existing) {
-                throw new Error("Order not found");
+            if (!employee) {
+                res.status(404).json({ error: "Employee not found" });
+                return;
             }
+        }
 
-            // ── 2. Separate base fields from nested fields ──
-            const { pickupTime, table, driverEmail, estimatedDeliveryTime,
-                    actualDeliveryTime, deliveryStatus, ...baseFields } = data;
-
-            // ── Discount: between 0 (checked by the schema) and the subtotal, and the
-            //    total follows it. total = subtotal - discount + delivery fee, so we
-            //    give back the old discount and take off the new one (the fee is kept).
-            let totalUpdate = {};
-            if (baseFields.discount !== undefined) {
-                if (baseFields.discount > existing.subtotal) {
-                    throw new Error("Discount cannot be more than the subtotal");
-                }
-                totalUpdate = { total: existing.total + existing.discount - baseFields.discount };
+        if (driverEmail !== undefined) {
+            const driver = await prisma.employees.findUnique({
+                where: { email: driverEmail },
+            });
+            if (!driver) {
+                res.status(404).json({ error: "Driver not found" });
+                return;
             }
-
-            // ── 3. Update base order (only if there are base fields) ──
-            if (Object.values(baseFields).some((v) => v !== undefined)) {
-                await tx.orders.update({
-                    where: { number },
-                    data: { ...baseFields, ...totalUpdate },
-                });
+            if (driver.role !== "DELIVERY_DRIVER") {
+                res.status(400).json({ error: "This employee is not a delivery driver" });
+                return;
             }
+        }
 
-            // ── 4. Update type-specific record ──
-            if (existing.orderType === "pickup" && pickupTime !== undefined) {
-                await tx.pickupOrders.updateMany({
-                    where: { orderNumber: number },
-                    data: { pickupTime },
-                });
+        if (tableId !== undefined) {
+            const table = await prisma.table.findUnique({
+                where: { id: tableId },
+            });
+            if (!table) {
+                res.status(404).json({ error: "Table not found" });
+                return;
             }
+        }
 
-            if (existing.orderType === "dineIn" && table !== undefined) {
-                await tx.dineInOrders.updateMany({
-                    where: { orderNumber: number },
-                    data: { table },
-                });
+        // Step 9: if there is a new discount, work out the new total
+        // total = subtotal - discount + delivery fee
+        // so we give back the old discount and take off the new one
+        let newTotal: number | undefined = undefined;
+
+        if (discount !== undefined) {
+            if (discount > existing.subtotal) {
+                res.status(400).json({ error: "Discount cannot be more than the subtotal" });
+                return;
             }
+            newTotal = Math.round(existing.total + existing.discount - discount);
+        }
 
-            if (existing.orderType === "delivery") {
-                // Build delivery update dynamically (same pattern as where)
-                const deliveryUpdate: any = {};
-                if (driverEmail !== undefined)           deliveryUpdate.driverEmail = driverEmail;
-                if (estimatedDeliveryTime !== undefined)  deliveryUpdate.estimatedDeliveryTime = estimatedDeliveryTime;
-                if (actualDeliveryTime !== undefined)     deliveryUpdate.actualDeliveryTime = actualDeliveryTime;
-                if (deliveryStatus !== undefined)         deliveryUpdate.status = deliveryStatus;
+        // Step 10: save everything in one transaction
+        // Fields that are undefined are ignored by Prisma, so they stay unchanged
+        const order = await prisma.$transaction(
+            async (tx) => {
 
-                if (Object.keys(deliveryUpdate).length > 0) {
-                    await tx.deliveries.updateMany({
-                        where: { orderNumber: number },
-                        data: deliveryUpdate,
+                // Update the main order
+                if (status !== undefined || discount !== undefined || employeeEmail !== undefined) {
+                    await tx.orders.update({
+                        where: { number: number },
+                        data: {
+                            status: status,
+                            discount: discount,
+                            total: newTotal,
+                            employeeEmail: employeeEmail,
+                        },
                     });
                 }
+
+                // Update the pickup row
+                if (pickupTime !== undefined) {
+                    await tx.pickupOrders.updateMany({
+                        where: { orderNumber: number },
+                        data: { pickupTime: pickupTime },
+                    });
+                }
+
+                // Update the dine-in row
+                if (tableId !== undefined) {
+                    await tx.dineInOrders.updateMany({
+                        where: { orderNumber: number },
+                        data: { tableId: tableId },
+                    });
+                }
+
+                // Update the delivery row
+                if (hasDeliveryField) {
+                    await tx.deliveries.updateMany({
+                        where: { orderNumber: number },
+                        data: {
+                            driverEmail: driverEmail,
+                            estimatedDeliveryTime: estimatedDeliveryTime,
+                            actualDeliveryTime: actualDeliveryTime,
+                            status: deliveryStatus,
+                        },
+                    });
+                }
+
+                // Return the full updated order
+                return tx.orders.findUniqueOrThrow({
+                    where: { number: number },
+                    include: fullOrderInclude,
+                });
+            },
+            {
+                maxWait: 10000,
+                timeout: 20000,
             }
+        );
 
-            // ── 5. Return full updated order ──
-            return tx.orders.findUniqueOrThrow({
-                where: { number },
-                include: fullOrderInclude,
-            });
-        });
-
+        // Step 11: send the result
         res.status(200).json({ data: order });
-    } catch (err: any) {
-        console.error("updateOrder failed:", err);
-        res.status(500).json({
-            error: { message: "Failed to update order", code: "ORDER_UPDATE_FAILED" },
-        });
+
+    } catch (error) {
+        console.error("Error updating order:", error);
+        res.status(500).json({ error: "Failed to update order" });
     }
 };
 
+export const updateOrderStatus = async (req: Request, res: Response): Promise<void> => {
+    try{
+         const result = orderStatusQuerySchema.safeParse(req.query);
+
+         if(!result.data) {
+            const fieldErrors = z.flattenError(result.error)
+            res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
+            return;
+         }
+
+         const { status } = result.data;
+
+         const number = req.params.number;
+
+            if (typeof number !== "string") {
+                res.status(400).json({ error: "Invalid order number" });
+                return;
+            }
+
+        const updatedOrder = await prisma.orders.update({
+            where: { number },
+            data: { status },
+            include: fullOrderInclude,
+        });
+
+        res.status(200).json({ data: updatedOrder });
+
+    }catch (error) {
+        res.status(500).json({ error: "Failed to update order status" });
+        console.log("Error updating order status:", error);
+    };
+};
 
 // DELETE orders : DANGEROUS
 

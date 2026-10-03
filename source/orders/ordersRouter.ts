@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
     placeOrder, getOrdersByBranch, getMyOrders, updateOrder, deleteOrders,
     dispatchOrder, updateOrderItemStatus,
-    GuestplaceOrder,
+    GuestplaceOrder, updateOrderStatus
 } from "./order.service.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import roleMiddleware from "../middlewares/role.middleware.js";
@@ -29,6 +29,7 @@ router.patch("/items/:itemId/status", authMiddleware,roleMiddleware("KITCHEN_STA
 
 // UPDATE
 router.patch("/:number", authMiddleware,roleMiddleware("CASHIER", "MANAGER", "ADMIN"), updateOrder);
+router.patch("/:number/status", authMiddleware, updateOrderStatus);  // for updating status only
 
 // DELETE: admins only (body: { numbers: [...] })
 router.delete("/", authMiddleware, roleMiddleware("ADMIN"), deleteOrders);

@@ -21,6 +21,7 @@ const baseOrder = {
     guestName: z.string().optional(),
     guestPhone: z.e164().optional(),
     items: z.array(orderItemSchema).min(1),
+   
 };
 
 // ── Discriminated union: one parse validates everything ──
@@ -76,6 +77,7 @@ export const updateOrderSchema = z.object({
     estimatedDeliveryTime: z.coerce.date().optional(),
     actualDeliveryTime:    z.coerce.date().optional(),
     deliveryStatus:        z.enum(deliveryStatusEnum).optional(),
+     tableId: z.string().optional(),
 });
 
 // In order.schema.ts
