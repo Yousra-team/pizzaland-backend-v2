@@ -30,7 +30,14 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
                 ...customer
             },
         });
-
+        
+        await prisma.accounts.create({
+            data: {
+                customerPhone: newCustomer.phone,
+                balance: 0,
+            },
+        });
+        
         res.status(201).json(newCustomer);
 
     } catch (error) {

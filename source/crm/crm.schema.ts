@@ -38,15 +38,10 @@ export const reviewSchema = z.object({
 
 export const accountSchema = z.object({
   customerPhone: z.e164(),
-  balance: z.number().min(0),
-  password: z.string().min(4).max(20),
+  balance: z.number().positive(),
 });
 
-// Used by credit/debit: amount must be strictly positive
-export const accountMovementSchema = z.object({
-  customerPhone: z.e164(),
-  amount: z.number().positive(),
-});
+
 
 // The owner (customer or employee) comes from the token, so only name and value are sent
 export const userPreferenceSchema = z.object({

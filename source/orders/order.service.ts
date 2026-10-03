@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
 import { fullOrderInclude } from "./order.include.js";
 import * as z from "zod";
+import { creditAccount , convertToYousraCoins } from "../crm/account.js";
 
 
 // Helper Functions
@@ -155,6 +156,7 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 if (!data.branchId) {
                     throw new Error("branchId is required for dine-in orders");
                 }
+                //pickup  
                 branchId = data.branchId;
             }
 
@@ -172,9 +174,11 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 if (!customerPhone) {
                     throw new Error("Customer phone not found");
                 }
+                
             } else if (actor === "STAFF") {
                 customerPhone = data.customerPhone;
                 employeeEmail = req.user.Id;
+
             } else if (actor === "EMPLOYEE") {
                 employeeEmail = req.user.Id;
                 if (!employeeEmail) {
@@ -240,14 +244,6 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             }
 
             if (data.orderType === "dineIn") {
-               const table = await tx.table.findUnique({
-              where: { id: data.tableId },
-               });
-
-                if (!table) {
-                  throw new Error("Table not found");
-               }
-
                await tx.dineInOrders.create({
                     data: {
                       orderNumber: order.number,
@@ -255,9 +251,31 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
            },
          });
 }
+             // Reward: 10% of the order total in Yousra coins
+            // customerPhone is only set for CUSTOMER and STAFF orders
+       if (customerPhone) {
+               const account = await tx.accounts.findUnique({
+                where: { customerPhone: customerPhone },
+          });
 
-            return order;
-        });
+                if (account) {
+                     const coins = convertToYousraCoins(0.1 * total);
+
+               // a very small order can round down to 0 coins
+                if (coins > 0) {
+                     await creditAccount(customerPhone, coins, tx);
+            }
+              }
+         }
+
+             return order;
+           
+        },
+       {
+            maxWait: 10000,
+            timeout: 20000,
+        }
+    );
 
         // Step 11: send the result
         res.status(201).json(newOrder);

@@ -202,8 +202,7 @@ model Token {
 
 model Accounts {
   customerPhone String    @id @unique @map("customer_phone")
-  balance       Decimal   @default(0) @db.Decimal(14, 2)
-  password      String
+  balance       Float     @default(0)
   customer      Customers @relation(fields: [customerPhone], references: [phone])
   createdAt     DateTime  @default(now()) @map("created_at")
 

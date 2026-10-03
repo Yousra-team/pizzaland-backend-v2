@@ -29,7 +29,7 @@ router.patch("/items/:itemId/status", authMiddleware,roleMiddleware("KITCHEN_STA
 
 // UPDATE
 router.patch("/:number", authMiddleware,roleMiddleware("CASHIER", "MANAGER", "ADMIN"), updateOrder);
-router.patch("/:number/status", authMiddleware, updateOrderStatus);  // for updating status only
+router.patch("/:number/status", authMiddleware , updateOrderStatus);  // for updating status only
 
 // DELETE: admins only (body: { numbers: [...] })
 router.delete("/", authMiddleware, roleMiddleware("ADMIN"), deleteOrders);
