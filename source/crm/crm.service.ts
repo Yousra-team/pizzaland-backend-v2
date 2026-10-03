@@ -38,7 +38,7 @@ export const addFavorite = async (req: Request, res: Response): Promise<void> =>
 
 // Add a review for a product by the logged-in customer
 export const addReview = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user!.userId;
+    const customerPhone = req.user.Id;
     const result = reviewSchema.safeParse(req.body);
     if (!result.success) {
         res.status(400).json({ error: { message: "Invalid review data", details: z.flattenError(result.error).fieldErrors } });
@@ -69,7 +69,7 @@ export const addUserPreference = async (req: Request, res: Response): Promise<vo
         return;
     }
 
-    const owner = req.user!.role === "CUSTOMER"
+    const owner = req.user.role === "CUSTOMER"
         ? { customerPhone: req.user!.userId }
         : { employeeEmail: req.user!.userId };
 
@@ -98,7 +98,7 @@ export const addUserPreference = async (req: Request, res: Response): Promise<vo
 };
 
 export const createAddress = async(req: Request, res: Response) => {
-    const customerPhone = req.user.id;
+    const customerPhone = req.user.Id;
     
     if(!customerPhone) {
         res.status(401).json({message : "You are not logged In"});
@@ -152,7 +152,7 @@ export const getReviewsByProductId = async (req: Request, res: Response): Promis
 
 // Get all reviews written by the logged-in customer
 export const getReviewsByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user!.userId;
+    const customerPhone = req.user.Id;
     try {
         const reviews = await prisma.reviews.findMany({
             where: { customerPhone },
@@ -167,7 +167,7 @@ export const getReviewsByCustomerPhone = async (req: Request, res: Response): Pr
 
 // Get all favorites of the logged-in customer
 export const getFavoritesByCustomerPhone = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user!.userId;
+    const customerPhone = req.user.Id;
     try {
         const favorites = await prisma.favorites.findMany({
             where: { customerPhone },
@@ -197,7 +197,7 @@ export const getUserPreferences = async (req: Request, res: Response): Promise<v
 };
 
 export const getCustomerAddress = async(req: Request, res:Response): Promise<void> => {
-    const CustomerPhone = req.user.id;
+    const CustomerPhone = req.user.Id;
     
     if (!CustomerPhone) {
         res.status(401).json(401).json({message: "You are not logged In"})

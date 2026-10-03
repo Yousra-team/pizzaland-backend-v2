@@ -1,4 +1,4 @@
-import { accountSchema } from "./crm.schema.js";
+import { accountSchema , creditSchema } from "./crm.schema.js";
 import { prisma } from '../lib/prisma.js';
 import { Prisma } from "../generated/prisma/client.js";
 
@@ -12,7 +12,7 @@ export const creditAccount = async (
     amount: number,
     tx?: Prisma.TransactionClient
 ): Promise<void> => {
-    const result = accountSchema.safeParse({ customerPhone, amount });
+    const result = creditSchema.safeParse({ customerPhone, amount });
     if (!result.success) {
         throw new Error(`Invalid input: ${result.error.message}`);
     }

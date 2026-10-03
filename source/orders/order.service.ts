@@ -538,7 +538,7 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
     try {
         const employee = await prisma.employees.findUnique({
             where: { email },
-            select: { branchId: true },  // only need this one field
+            select: { branchId: true , role: true},  // only need this one field
         });
 
         if (!employee) {
@@ -546,6 +546,7 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
             return;
         }
 
+        
         if (!employee.branchId) {
             res.status(400).json({
                 error: { message: "Employee is not assigned to a branch"},

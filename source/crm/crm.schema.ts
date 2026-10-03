@@ -41,6 +41,10 @@ export const accountSchema = z.object({
   balance: z.number().positive(),
 });
 
+export const creditSchema = z.object({
+    customerPhone: z.e164(),
+    amount: z.number().positive(),
+});
 
 
 // The owner (customer or employee) comes from the token, so only name and value are sent
