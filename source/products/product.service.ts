@@ -437,6 +437,7 @@ export const getAllProducts = async (req: Request, res: Response) =>  {
       
   try {
       const products = await prisma.products.findMany({
+          where: {isVisible: true},
           include: { addons: true, variants: true },
       });
       res.status(200).json({ data: products, meta: null });
@@ -453,7 +454,7 @@ export const getProductById = async (req: Request, res: Response) => {
 
     try {
         const product = await prisma.products.findUnique({
-            where: { id },
+            where: { id , isvisible: true },
             include: { addons: true, variants: true },
         });
 
@@ -473,6 +474,7 @@ export const getProductById = async (req: Request, res: Response) => {
 export const getCategories = async (req: Request, res: Response) => {
     try {
         const categories = await prisma.category.findMany({
+             where: {isVisible: true},
             include : {products: true , subcategories: true}
         });
         res.status(200).json({ data: categories, meta: null });
@@ -487,7 +489,7 @@ export const getCategoryById = async (req: Request, res: Response) => {
     const id = req.params.id as string;
    try {
         const category = await prisma.category.findUnique({
-            where: {id},
+            where: {id, isVisible: true},
             include: {products: true , subcategories : true}
         })
 
@@ -506,7 +508,9 @@ export const getCategoryById = async (req: Request, res: Response) => {
 
 export const getSubCategories = async (req: Request, res: Response) => {
     try {
-        const subcategories = await prisma.subCategory.findMany();
+        const subcategories = await prisma.subCategory.findMany({
+             where: {isVisible: true},
+        });
         res.status(200).json({ data: subcategories, meta: null });
     } catch (error) {
         console.error("Error fetching subcategories:", error);
@@ -518,7 +522,7 @@ export const getSubCategoryById = async (req: Request , res: Response) => {
     const id = req.params.id as string
    try {
         const subcategory = await prisma.subCategory.findUnique({
-            where: {id},
+            where: {id, isVisible: true},
             include: {products : true } // I want to see if I can include addons and variants from here
         })
 
@@ -536,7 +540,9 @@ export const getSubCategoryById = async (req: Request , res: Response) => {
 
 export const getAddons = async (req: Request, res: Response) => {
     try {
-        const addons = await prisma.addons.findMany();
+        const addons = await prisma.addons.findMany({
+             where: {isVisible: true},
+        });
         res.status(200).json({ data: addons, meta: null });
     }
     catch (error) {
@@ -551,7 +557,7 @@ export const getAddonById = async (req: Request, res: Response) => {
     const id = req.params.id as string
     try {
         const addons = await prisma.addons.findUnique({
-            where: {id},
+            where: {id, isVisible: true},
         });
 
         if (!addons) {
@@ -569,6 +575,7 @@ export const getAddonById = async (req: Request, res: Response) => {
 export const getMenus = async (req: Request , res: Response) => {
     try {
         const menus = await prisma.menu.findMany({
+            where: {isVisible: true},
             include: {
             items: {
                  include: {
@@ -588,7 +595,7 @@ export const getMenuById = async (req: Request , res: Response) => {
     const id = req.params.id as string
     try {
         const menus = await prisma.menu.findUnique({
-            where: {id},
+            where: {id, isVisible: true},
             include: {
             items: {
                  include: {

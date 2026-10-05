@@ -312,6 +312,7 @@ model Category {
   description   String
   imageUrl      String?       @map("Image URL")
   imagePath     String?       @map("Image Path")
+  isVisible     Boolean       @default(true) @map("is_visible")
   products      Products[]
   subcategories SubCategory[]
   menus         Menu[]
@@ -328,6 +329,7 @@ model SubCategory {
   imageUrl    String?    @map("Image URL")
   imagePath   String?    @map("Image PATH")
   categoryId  String     @map("CATEGORY ID")
+  isVisible   Boolean    @default(true) @map("is_visible")
   category    Category   @relation(fields: [categoryId], references: [id])
   products    Products[]
   menus       Menu[]
@@ -352,6 +354,7 @@ model Products {
   imagePath       String?           @map("Image Path")
   popularity      Int?
   preparationTime Int?              @map("preparation_time")
+  isVisible       Boolean           @default(true) @map("is_visible")
   variants        ProductVariants[]
   menuItems       MenuItems[]
   orderItems      OrderItems[]
@@ -375,8 +378,11 @@ model Addons {
   imageUrl        String?      @map("Image URL")
   imagePath       String?      @map("Image Path")
   price           Float
+  isVisible       Boolean      @default(true) @map("is_visible")
   Products        Products[]
   orderItems      OrderItems[]
+  createdAt       DateTime     @default(now()) @map("created_at")
+ 
 
   @@index([name])
   @@map("Addons")
@@ -394,6 +400,7 @@ model Menu {
   imageUrl        String?      @map("Image URL")
   imagePath       String?      @map("Image Path")
   preparationTime Int?         @map("Preparation Time min")
+  isVisible       Boolean      @default(true) @map("is_visible")
   items           MenuItems[]
   orderItems      OrderItems[]
   createdAt       DateTime     @default(now()) @map("CREATED AT")

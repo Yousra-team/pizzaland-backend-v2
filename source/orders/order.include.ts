@@ -7,10 +7,19 @@ export const fullOrderInclude = {
         include: {
             product: { select: { id: true, name: true, price: true } },
             menu:    { select: { id: true, name: true, price: true } },
+            addons:  { select: { id: true, name: true, price: true } },
         },
     },
     pickupOrders: true,
-    dineInOrders: true,
+    dineInOrders: {
+        include: {
+            table: {
+                include: {
+                    floor: { select: { id: true, name: true } },
+                }
+            }
+        },
+    },
     deliveries: {
         include: {
             shippingAddress: {

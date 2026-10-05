@@ -9,6 +9,7 @@ export const ProductSchema = z.object({
     price : z.coerce.number().positive(),
     popularity: z.coerce.number().int().optional(),
     preparationTime : z.coerce.number().int().optional(),
+    isVisible: z.boolean().optional(),
 });
 
 export const AddonSchema = z.object({
@@ -16,16 +17,19 @@ export const AddonSchema = z.object({
    name : z.string(),
    description : z.string(),
    price : z.coerce.number(),
+   isVisible: z.boolean().optional(),
 });
 
 export const ProductVariantSchema = z.object({
     name : z.string(),
     price : z.coerce.number(), // coerce: arrives as a string via form-data
+    isVisible: z.boolean().optional(),
 });
 
 export const CategorySchema = z.object({
     name : z.string(),
     description : z.string(),
+    isVisible: z.boolean().optional(),
 });
 
 export const SubCategorySchema = z.object({

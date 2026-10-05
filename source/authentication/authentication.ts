@@ -5,6 +5,7 @@ import {createVerification, createVerificationCheck, sendMagicLinkToken, sendMag
 import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
 import {comparePassword, hashPassword} from "./bcrypt.util.js";
 import * as z from "zod";
+import crypto from "crypto";
 
 
 
@@ -167,7 +168,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
         };
              
        if (channel == "whatsapp") {
-                /* // Commented untill we finish testing
+                 // Commented untill we finish testing
            const token = crypto.randomBytes(32).toString("hex");
            const sendToken =  await prisma.token.create({
             data:{
@@ -197,7 +198,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
              res.status(200).json({message:"code de vérification envoyé"})
          }
              return;
-             */
+             
         };
 
        
