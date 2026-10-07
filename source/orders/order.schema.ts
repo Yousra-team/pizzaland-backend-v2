@@ -12,6 +12,7 @@ const orderItemSchema = z.object({
     menuId:           z.string().optional(),
     addonId:          z.string().optional(),
     quantity:         z.number().int().min(1),
+    instructions:     z.string().optional(),
     type:             z.enum(itemTypeEnum),
 });
 

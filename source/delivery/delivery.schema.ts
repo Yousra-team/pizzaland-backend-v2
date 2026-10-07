@@ -39,3 +39,8 @@ export const driverDeliveryInclude = {
 export const deliveryStatusSchema = z.object({
     status: z.enum(["in_transit", "delivered", "failed"]),
 });
+
+export const AssignDeliverySchema = z.object({
+    email: z.email(),
+    order:z.string()
+});

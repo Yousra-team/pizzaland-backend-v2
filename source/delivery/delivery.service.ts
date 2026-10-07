@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import * as z from "zod";
 import { prisma } from "../lib/prisma.js";
-import { driverDeliveryInclude, deliveryStatusSchema } from "./delivery.schema.js";
+import { driverDeliveryInclude, deliveryStatusSchema, AssignDeliverySchema } from "./delivery.schema.js";
 
 // All handlers run after authMiddleware + roleMiddleware("DELIVERY_DRIVER"),
 // so req.user.userId is the driver's email.
@@ -9,7 +9,7 @@ import { driverDeliveryInclude, deliveryStatusSchema } from "./delivery.schema.j
 
 // ── 1. Available deliveries at driver's branch (unassigned only) ──
 export const getAvailableDeliveries = async (req: Request, res: Response): Promise<void> => {
-    const email = req.user?.userId;
+    const email = req.user.Id;
     if (!email) {
         res.status(401).json({ error: { message: "Authentication required", code: "UNAUTHENTICATED" } });
         return;
@@ -23,7 +23,7 @@ export const getAvailableDeliveries = async (req: Request, res: Response): Promi
 
         if (!driver?.branchId) {
             res.status(403).json({
-                error: { message: "Not assigned to a branch", code: "NO_BRANCH" },
+                error: { message: "Not assigned to a branch"},
             });
             return;
         }
@@ -47,10 +47,105 @@ export const getAvailableDeliveries = async (req: Request, res: Response): Promi
     }
 };
 
+export const assignDeliveryToDriver = async (req: Request, res: Response): Promise<void> => {
+    try {
+           
+           const result = AssignDeliverySchema.safeParse(req.body);
+           if(!result.success) {
+            res.status(400).json({message:"Unexpected or missing input"})
+            return;
+           }
+           
+           const {order , email} = result.data
+
+           const isThisAdriver = await prisma.employees.findUnique({
+              where: {email: email , role: "DELIVERY_DRIVER"}
+           });
+
+           if(!isThisAdriver) {
+            res.status(400).json({message:"This is not a driver"})
+            return;
+           }
+
+           if(!order) {
+            res.status(400).json({message:"Order Number is required"})
+            return;
+           }
+           // Add a check to ensure the order is in the right status before it can be assigned
+
+           const delivery = await prisma.deliveries.findFirst({
+             where: {
+               orderNumber: order,
+               status: "pending" 
+             },
+             select: {
+                id: true
+             }
+           });
+
+           if(!delivery) {
+             res.status(400).json({message:"No deliveries found"})
+             return;
+           };
+
+           const Id = delivery.id
+           
+           const updatedDelivery = await prisma.deliveries.update({
+               where: {id: Id},
+               data: { 
+                driverEmail: email,
+                status: "assigned" },
+                include: driverDeliveryInclude,
+           });
+      
+      res.status(200).json(updatedDelivery);   
+    } catch (error) {
+       res.status(500).json({message: "An Internal server error"})
+       console.log(error)
+ }
+};
+
+export const findDrivers = async (req: Request , res: Response): Promise<void> => {
+    try {
+        const myEmail = req.user.Id
+
+        if(!myEmail) {
+            res.status(401).json({message:"You are not logged In"})
+            return;
+        }
+
+        const cashier = await prisma.employees.findUnique({
+            where: {
+                email: myEmail
+            },
+            select: {branchId: true}
+        });
+
+        if(!cashier) {
+            res.status(400).json({message: "No Cashier with this email exists"})
+            return;
+        }
+
+        const branch = cashier.branchId
+
+        const drivers = await prisma.employees.findMany({
+            where: {role: "DELIVERY_DRIVER" , branchId: branch}
+        });
+
+        res.status(201).json(drivers)
+
+    } catch (error) {
+       res.status(500).json({message: "Internal server error finding drivers"})
+       console.log(error)    
+    }
+};
+
+
+
 
 // ── 2. Driver claims a delivery ──
 export const claimDelivery = async (req: Request, res: Response): Promise<void> => {
-    const email = req.user?.userId;
+    const email = req.user.Id;
     const deliveryId = req.params.deliveryId;
 
     if (typeof deliveryId !== "string" || !email) {
@@ -117,7 +212,7 @@ export const claimDelivery = async (req: Request, res: Response): Promise<void> 
 
 // ── 3. Driver's own deliveries (active + history) ──
 export const getMyDeliveries = async (req: Request, res: Response): Promise<void> => {
-    const email = req.user?.userId;
+    const email = req.user.Id;
     // Without this check, `driverEmail: undefined` means "no filter" to Prisma
     // and every driver's deliveries would be returned
     if (!email) {
