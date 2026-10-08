@@ -10,7 +10,7 @@ import { prisma } from '../lib/prisma.js';
 
 // Add a favorite product for the logged-in customer
 export const addFavorite = async (req: Request, res: Response): Promise<void> => {
-    const customerPhone = req.user!.userId;
+    const customerPhone = req.user.Id;
     const result = favoriteSchema.safeParse(req.body);
     if (!result.success) {
         res.status(400).json({ error: { message: "Invalid favorite data", details: z.flattenError(result.error).fieldErrors } });
@@ -70,8 +70,8 @@ export const addUserPreference = async (req: Request, res: Response): Promise<vo
     }
 
     const owner = req.user.role === "CUSTOMER"
-        ? { customerPhone: req.user!.userId }
-        : { employeeEmail: req.user!.userId };
+        ? { customerPhone: req.user.Id }
+        : { employeeEmail: req.user.Id };
 
     try {
         const existing = await prisma.userPreferences.findFirst({
