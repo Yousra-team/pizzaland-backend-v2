@@ -28,7 +28,7 @@ router.patch("/:number/dispatch", authMiddleware,roleMiddleware("KITCHEN_CHEF", 
 router.patch("/items/:itemId/status", authMiddleware,roleMiddleware("KITCHEN_STAFF", "KITCHEN_CHEF"), updateOrderItemStatus);
 
 // UPDATE
-router.patch("/:number", authMiddleware,roleMiddleware("CASHIER", "MANAGER", "ADMIN"), updateOrder);
+router.patch("/:number", authMiddleware, roleMiddleware("CASHIER", "MANAGER", "ADMIN" ,"WAITER"), updateOrder);
 router.patch("/:number/status", authMiddleware , updateOrderStatus);  // for updating status only
 
 // DELETE: admins only (body: { numbers: [...] })
