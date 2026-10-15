@@ -45,7 +45,7 @@ app.use("/api/v2/crm", crmRoutes);
 app.use("/api/v2/orders", orderRoutes);
 app.use("/api/v2/restaurant", restaurantRoutes);
 app.use("/api/v2/admin", adminRouter)
-app.use("api/v2/cashier", cashierRouter)
+app.use("/api/v2/cashier", cashierRouter)
 
 app.use("/", (req, res) => {
     res.send("Welcome to Pizzaland API , Made with ❤️ by Yousra");
