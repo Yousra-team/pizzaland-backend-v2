@@ -27,7 +27,7 @@ router.get("/branch", authMiddleware ,                                          
 // KITCHEN
 router.patch("/:number/dispatch", authMiddleware,roleMiddleware("KITCHEN_CHEF", "MANAGER", "ADMIN"), dispatchOrder);
 router.patch("/items/:itemId/status", authMiddleware,roleMiddleware("KITCHEN_STAFF", "KITCHEN_CHEF"), updateOrderItemStatus);
-router.get("/:stationId", getStationOrders)
+router.get("/station/:stationId", getStationOrders)
 
 // UPDATE
 router.patch("/:number", authMiddleware, roleMiddleware("CASHIER", "MANAGER", "ADMIN" ,"WAITER"), updateOrder);

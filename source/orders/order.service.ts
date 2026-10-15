@@ -888,7 +888,7 @@ export const deleteOrders = async (req: Request, res: Response): Promise<void> =
 // For Chefs to Dispatch Orders
 export const dispatchOrder = async (req: Request, res: Response) => {
     try {
-        const orderNumber = req.params.orderNumber as string;
+        const orderNumber = req.params.number as string;
 
         if (!orderNumber) {
             res.status(400).json({ error: { message: "Order number is required" } });
@@ -951,7 +951,7 @@ export const getStationOrders = async (req: Request, res: Response) => {
                     include: {
                         product: true,
                         productVariant: { select: { name: true } },
-                        addon: true,
+                        addons: true,
                         menu: true
                     }
                 }
