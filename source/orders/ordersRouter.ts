@@ -2,7 +2,8 @@ import { Router } from "express";
 import {
     placeOrder, getOrdersByBranch, getMyOrders, updateOrder, deleteOrders,
     dispatchOrder, updateOrderItemStatus,
-    GuestplaceOrder, updateOrderStatus
+    GuestplaceOrder, updateOrderStatus,
+    getStationOrders
 } from "./order.service.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import roleMiddleware from "../middlewares/role.middleware.js";
@@ -26,6 +27,7 @@ router.get("/branch", authMiddleware ,                                          
 // KITCHEN
 router.patch("/:number/dispatch", authMiddleware,roleMiddleware("KITCHEN_CHEF", "MANAGER", "ADMIN"), dispatchOrder);
 router.patch("/items/:itemId/status", authMiddleware,roleMiddleware("KITCHEN_STAFF", "KITCHEN_CHEF"), updateOrderItemStatus);
+router.get("/:stationId", getStationOrders)
 
 // UPDATE
 router.patch("/:number", authMiddleware, roleMiddleware("CASHIER", "MANAGER", "ADMIN" ,"WAITER"), updateOrder);

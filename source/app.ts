@@ -8,6 +8,7 @@ import crmRoutes from './crm/crmRouter.js';
 import orderRoutes from './orders/ordersRouter.js';
 import kitchenRoutes from './kitchen/kitchenRouter.js'
 import restaurantRoutes from './dining/restaurantRouter.js'
+import cashierRouter from "./pos/posRouter.js"
 import adminRouter from "./admin/adminRouter.js"
 import errorMiddleware from './middlewares/error.middleware.js';
 import cors from "cors";
@@ -44,6 +45,7 @@ app.use("/api/v2/crm", crmRoutes);
 app.use("/api/v2/orders", orderRoutes);
 app.use("/api/v2/restaurant", restaurantRoutes);
 app.use("/api/v2/admin", adminRouter)
+app.use("api/v2/cashier", cashierRouter)
 
 app.use("/", (req, res) => {
     res.send("Welcome to Pizzaland API , Made with ❤️ by Yousra");

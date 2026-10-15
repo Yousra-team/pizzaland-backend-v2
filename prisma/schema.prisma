@@ -383,7 +383,6 @@ model Addons {
   Products        Products[]
   orderItems      OrderItems[]
   createdAt       DateTime     @default(now()) @map("created_at")
- 
 
   @@index([name])
   @@map("Addons")
@@ -749,10 +748,10 @@ model Table {
 }
 
 model Floor {
-  id   String @id @default(uuid())
-  name String @map("Name")
-  branch Branches @relation(fields: [branchId], references: [id])
-  branchId String @map("Branch ID")
+  id       String   @id @default(uuid())
+  name     String   @map("Name")
+  branch   Branches @relation(fields: [branchId], references: [id])
+  branchId String   @map("Branch ID")
 
   tables Table[]
 }

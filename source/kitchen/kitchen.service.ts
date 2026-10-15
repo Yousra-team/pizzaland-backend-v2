@@ -69,3 +69,5 @@ export const getKitchenStation = async(req: Request , res: Response): Promise<vo
         console.error(error)
     }
 };
+
+export const dispatchOrder = async(req: Request , res: Response): Promise<void> => {};

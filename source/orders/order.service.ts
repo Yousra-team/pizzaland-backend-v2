@@ -1,7 +1,7 @@
 
 import { prisma } from "../lib/prisma.js";
 import { Request, Response } from "express";
-import { createOrderSchema , orderStatusQuerySchema , statusEnum , updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
+import { createOrderSchema , orderStatusQuerySchema , statusEnum , orderItemSchema, updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
 import { fullOrderInclude } from "./order.include.js";
 import * as z from "zod";
 import { creditAccount , convertToYousraCoins } from "../crm/account.js";
@@ -108,7 +108,9 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 // Save this item's data, we create it after the order exists
                 itemsToCreate.push({
                     productId: item.productId,
+                    productVariantId: item.productVariantId,
                     menuId: item.menuId,
+                    instructions: item.instructions,
                     quantity: item.quantity,
                     price: price,
                     type: item.type,
@@ -209,6 +211,8 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                     data: {
                         orderNumber: order.number,
                         productId: item.productId,
+                        productVariantId: item.productVariantId,
+                        Instructions: item.instructions,
                         menuId: item.menuId,
                         quantity: item.quantity,
                         price: item.price,
@@ -369,6 +373,8 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
 
                     itemsToCreate.push({
                         productId: item.productId,
+                        productVariantId: item.productVariantId,
+                        instructions: item.instructions,
                         menuId: item.menuId,
                         quantity: item.quantity,
                         price: price,
@@ -446,6 +452,8 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                         data: {
                             orderNumber: order.number,
                             productId: item.productId,
+                            productVariantId: item.productVariantId,
+                            Instructions: item.instructions,
                             menuId: item.menuId,
                             quantity: item.quantity,
                             price: item.price,
@@ -877,251 +885,222 @@ export const deleteOrders = async (req: Request, res: Response): Promise<void> =
     }
 };
 
-// For Kitchen stations 
-
-//This is for the Chef to mark their order as dispatched
-export const dispatchOrder = async (req: Request, res: Response): Promise<void> => {
-    const number = req.params.number;
-
-    if (typeof number !== "string") {
-        res.status(400).json({ error: { message: "Invalid order number", code: "INVALID_PARAM" } });
-        return;
-    }
-
+// For Chefs to Dispatch Orders
+export const dispatchOrder = async (req: Request, res: Response) => {
     try {
-        // ── 1. Fetch order items with full product/menu chain ──
-        const order = await prisma.orders.findUnique({
-            where: { number },
-            select: {
-                number: true,
-                status: true,
-                branchId: true,
-                items: {
-                    include: {
-                        product: {
-                            select: {
-                                id: true,
-                                name: true,
-                                stationId: true,
-                                station: { select: { id: true, name: true } },
-                            },
-                        },
-                        menu: {
-                            select: {
-                                id: true,
-                                name: true,
-                                items: {
-                                    include: {
-                                        product: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                                stationId: true,
-                                                station: { select: { id: true, name: true } },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-        });
+        const orderNumber = req.params.orderNumber as string;
 
-        if (!order) {
-            res.status(404).json({ error: { message: "Order not found", code: "NOT_FOUND" } });
+        if (!orderNumber) {
+            res.status(400).json({ error: { message: "Order number is required" } });
             return;
         }
 
-        // ── 2. Resolve every item to station assignments ──
-        // Each entry = one thing a station needs to prepare
-        const stationTasks: {
-            stationId: string;
-            stationName: string;
-            orderItemId: string;
-            productId: string;
-            productName: string;
-            quantity: number;
-            source: "product" | "menu";
-            menuName?: string;
-        }[] = [];
+        const order = await prisma.orders.findUnique({
+            where: { number: orderNumber },
+        });
 
-        for (const item of order.items) {
-            if (item.type === "product" && item.product) {
-                // Direct product → direct station
-                if (!item.product.station) {
-                    throw new Error(`Product "${item.product.name}" has no station assigned`);
-                }
-                stationTasks.push({
-                    stationId: item.product.station.id,
-                    stationName: item.product.station.name,
-                    orderItemId: item.id,
-                    productId: item.product.id,
-                    productName: item.product.name,
-                    quantity: item.quantity,
-                    source: "product",
-                });
-
-            } else if (item.type === "menu" && item.menu) {
-                // Menu → MenuItems → each product goes to its own station
-                for (const menuItem of item.menu.items) {
-                    if (!menuItem.product.station) {
-                        throw new Error(`Product "${menuItem.product.name}" in menu "${item.menu.name}" has no station`);
-                    }
-                    stationTasks.push({
-                        stationId: menuItem.product.station.id,
-                        stationName: menuItem.product.station.name,
-                        orderItemId: item.id,
-                        productId: menuItem.product.id,
-                        productName: menuItem.product.name,
-                        // Menu quantity × product quantity inside the menu
-                        quantity: item.quantity * menuItem.quantity,
-                        source: "menu",
-                        menuName: item.menu.name,
-                    });
-                }
-            }
+        if (!order) {
+            res.status(404).json({ error: { message: "Order does not exist" } });
+            return;
         }
 
-        // ── 3. Group by station ──
-        const stationMap = new Map<string, {
-            stationId: string;
-            stationName: string;
-            tasks: typeof stationTasks;
-        }>();
-
-        for (const task of stationTasks) {
-            if (!stationMap.has(task.stationId)) {
-                stationMap.set(task.stationId, {
-                    stationId: task.stationId,
-                    stationName: task.stationName,
-                    tasks: [],
-                });
-            }
-            stationMap.get(task.stationId)!.tasks.push(task);
+        if (order.status !== "pending") {
+            res.status(400).json({ error: { message: "Order is already dispatched" } });
+            return;
         }
 
-        // ── 4. Update order + item statuses ──
-        // Only a new order can be dispatched. The status check is inside the update itself:
-        // dispatching twice, or a cancelled/finished order, would otherwise send it back to
-        // "kitchen" and reset items that are already ready.
+        // One transaction: update order + all its items
         await prisma.$transaction(async (tx) => {
-            const updated = await tx.orders.updateMany({
-                where: { number, status: { in: ["pending", "confirmed"] } },
-                data: { status: "kitchen" },
+            await tx.orders.update({
+                where: { number: orderNumber },
+                data: { status: "preparing" },
             });
-            if (updated.count === 0) {
-                throw new Error (`Order cannot be dispatched while it is "${order.status}"`);
-            }
 
             await tx.orderItems.updateMany({
-                where: { orderNumber: number, status: "pending" },
+                where: { orderNumber: orderNumber },
                 data: { status: "in_station" },
             });
         });
 
-        // ── 5. Return grouped dispatch ──
-        res.status(200).json({
-            data: {
-                orderNumber: order.number,
-                stations: Array.from(stationMap.values()),
-            },
-        });
+        res.status(200).json({ data: { message: "Order dispatched to stations" } });
+        return;
 
-    } catch (err: any) {
-        console.error("dispatchOrder failed:", err);
-        res.status(500).json({
-            error: { message: "Failed to dispatch order", code: "DISPATCH_FAILED" },
-        });
+    } catch (error) {
+        console.error("Error dispatching order:", error);
+        res.status(500).json({ error: { message: "Failed to dispatch order" } });
+        return;
     }
 };
 
-// Send them back to the kitchen station 
+//This is for the Station to find their dispatched Order Item
+export const getStationOrders = async (req: Request, res: Response) => {
+    try {
+        const stationId = req.params.stationId as string;
 
-export const updateOrderItemStatus = async (req: Request, res: Response): Promise<void> => {
-    const itemId = req.params.itemId;
+        if (!stationId) {
+            res.status(400).json({ error: { message: "Station id is required" } });
+            return;
+        }
 
-    if (typeof itemId !== "string") {
-        res.status(400).json({ error: { message: "Invalid item id", code: "INVALID_PARAM" } });
+        // Find all orders that are in the kitchen
+        const kitchenOrders = await prisma.orders.findMany({
+            where: { status: "preparing" },
+            include: {
+                customer: true,
+                items: {
+                    include: {
+                        product: true,
+                        productVariant: { select: { name: true } },
+                        addon: true,
+                        menu: true
+                    }
+                }
+            }
+        });
+
+        const stationTickets = [];
+
+        for (let order of kitchenOrders) {
+            const stationItems: any[] = [];
+
+            for (let item of order.items) {
+
+                // ── Product ──
+                if (item.type === "product") {
+                    if (!item.productId) continue;
+
+                    const product = await prisma.products.findUnique({
+                        where: { id: item.productId },
+                        include: { station: true, addons: true }
+                    });
+
+                    if (!product || !product.station) continue;
+                    if (product.station.id !== stationId) continue;
+
+                    const addonIds = product.addons.map(addon => addon.id);
+                    const matchedAddons = order.items.filter(
+                        orderItem => orderItem.addonId !== null && addonIds.includes(orderItem.addonId)
+                    );
+
+                    stationItems.push({
+                        itemId: product.id,
+                        itemName: product.name,
+                        itemVariant: item.productVariant?.name,
+                        itemType: "product",
+                        quantity: item.quantity,
+                        addons: matchedAddons
+                    });
+                }
+
+                // ── Menu ──
+                if (item.type === "menu") {
+                    if (!item.menuId) continue;
+
+                    const menu = await prisma.menu.findUnique({
+                        where: { id: item.menuId },
+                        include: {
+                            items: {
+                                include: {
+                                    product: { select: { name: true, stationId: true } }
+                                }
+                            }
+                        }
+                    });
+
+                    if (!menu) continue;
+
+                    for (const menuItem of menu.items) {
+                        if (menuItem.product.stationId === stationId) {
+                            stationItems.push({
+                                itemId: menuItem.id,
+                                itemName: menuItem.product.name,
+                                itemType: "menu",
+                                menuName: menu.name,
+                                quantity: item.quantity * menuItem.quantity
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Only include this order if it has items for this station
+            if (stationItems.length > 0) {
+                stationTickets.push({
+                    orderNumber: order.number,
+                    items: stationItems
+                });
+            }
+        }
+
+        res.status(200).json({ data: stationTickets });
+        return;
+
+    } catch (error) {
+        console.error("Error getting station orders:", error);
+        res.status(500).json({ error: { message: "Failed to get station orders" } });
         return;
     }
+};
 
-    const result = markItemStatusSchema.safeParse(req.body);
-    if (!result.success) {
-        res.status(400).json({
-            error: {
-                message: "Validation failed",
-                code: "VALIDATION_ERROR",
-                details: result.error.issues.map((i) => ({
-                    field: i.path.join("."),
-                    message: i.message,
-                })),
+
+// Send them back to the kitchen station 
+export const updateOrderItemStatus = async (req: Request, res: Response) => {
+    try {
+        const itemId = req.params.itemId as string;
+
+        if (!itemId) {
+            res.status(400).json({ error: { message: "Item id is required" } });
+            return;
+        }
+
+        // Step 1: find the item
+        const item = await prisma.orderItems.findUnique({
+            where: { id: itemId },
+        });
+
+        if (!item) {
+            res.status(404).json({ error: { message: "Order item not found" } });
+            return;
+        }
+
+        if (item.status !== "in_station") {
+            res.status(400).json({ error: { message: "Item is not in station" } });
+            return;
+        }
+
+        // Step 2: mark this item as ready
+        await prisma.orderItems.update({
+            where: { id: itemId },
+            data: { status: "ready" },
+        });
+
+        // Step 3: check if ALL items in this order are now ready
+        const remainingItems = await prisma.orderItems.findMany({
+            where: {
+                orderNumber: item.orderNumber,
+                status: { not: "ready" },
+            },
+        });
+
+        // Step 4: if nothing is left, mark the order as ready
+        if (remainingItems.length === 0) {
+            await prisma.orders.update({
+                where: { number: item.orderNumber },
+                data: { status: "ready" },
+            });
+        }
+
+        res.status(200).json({
+            data: {
+                message: "Item marked as ready",
+                orderReady: remainingItems.length === 0,
             },
         });
         return;
-    }
 
-    const { status } = result.data;
-
-    try {
-        const updated = await prisma.$transaction(async (tx) => {
-            // ── 1. Update the item ──
-            const item = await tx.orderItems.update({
-                where: { id: itemId },
-                data: { status },
-                select: { orderNumber: true },
-            });
-
-            // ── 2. Check if ALL items in the order are ready ──
-            const siblings = await tx.orderItems.findMany({
-                where: { orderNumber: item.orderNumber },
-                select: { status: true },
-            });
-
-            const allReady = siblings.every(
-                (s) => s.status === "ready" || s.status === "complete"
-            );
-
-            // ── 3. If yes, promote the order status ──
-            if (allReady) {
-                // Look up order type to pick the right next status
-                const order = await tx.orders.findUnique({
-                    where: { number: item.orderNumber },
-                    select: { orderType: true },
-                });
-
-                const nextStatus =
-                    order?.orderType === "delivery" ? "ready_for_delivery" : "ready";
-
-                // Only promote an order that is still being prepared: an order already
-                // ready, out for delivery, delivered or cancelled must never move back
-                await tx.orders.updateMany({
-                    where: {
-                        number: item.orderNumber,
-                        status: { in: ["pending", "confirmed", "kitchen", "preparing"] },
-                    },
-                    data: { status: nextStatus },
-                });
-            }
-
-            // ── 4. Return the full updated order ──
-            return tx.orders.findUniqueOrThrow({
-                where: { number: item.orderNumber },
-                include: fullOrderInclude,
-            });
-        });
-
-        res.status(200).json({ data: updated });
-    } catch (err: any) {
-        console.error("updateOrderItemStatus failed:", err);
-
-        if (err.code === "P2025") {
-            res.status(404).json({ error: { message: "Item not found", code: "NOT_FOUND" } });
-            return;
-        }
-        res.status(500).json({
-            error: { message: "Failed to update item", code: "ITEM_UPDATE_FAILED" },
-        });
+    } catch (error) {
+        console.error("Error marking item ready:", error);
+        res.status(500).json({ error: { message: "Failed to mark item ready" } });
+        return;
     }
 };

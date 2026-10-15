@@ -6,7 +6,7 @@ const itemTypeEnum  = ["addons", "menu", "product"] as const;
 const deliveryStatusEnum = ["pending", "assigned", "in_transit", "delivered", "failed"] as const;
 
 // ── Item schema (client only sends what to order) ──
-const orderItemSchema = z.object({
+export const orderItemSchema = z.object({
     productId:        z.string().optional(),
     productVariantId: z.string().optional(),
     menuId:           z.string().optional(),
@@ -93,3 +93,4 @@ const itemStatusEnum = ["pending", "preparing", "in_station", "out_of_station", 
 export const markItemStatusSchema = z.object({
     status: z.enum(itemStatusEnum),
 });
+

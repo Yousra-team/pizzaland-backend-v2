@@ -1,3 +1,4 @@
+
 // source/orders/order.includes.ts
 export const fullOrderInclude = {
     customer: {
@@ -6,8 +7,9 @@ export const fullOrderInclude = {
     items: {
         include: {
             product: { select: { id: true, name: true, price: true } },
+            productVariant: { select: { id: true, name: true, price: true } },
             menu:    { select: { id: true, name: true, price: true } },
-            addons:  { select: { id: true, name: true, price: true } },
+            addon:   { select: { id: true, name: true, price: true } },
         },
     },
     pickupOrders: true,
