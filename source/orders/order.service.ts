@@ -109,6 +109,7 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 itemsToCreate.push({
                     productId: item.productId,
                     productVariantId: item.productVariantId,
+                    addonId: item.addonId,
                     menuId: item.menuId,
                     instructions: item.instructions,
                     quantity: item.quantity,
@@ -214,6 +215,7 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                         productVariantId: item.productVariantId,
                         Instructions: item.instructions,
                         menuId: item.menuId,
+                        addonId: item.type === "addons" ? item.addonId : undefined,  // ← add
                         quantity: item.quantity,
                         price: item.price,
                         type: item.type,
@@ -375,6 +377,7 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                         productId: item.productId,
                         productVariantId: item.productVariantId,
                         instructions: item.instructions,
+                        addonId: item.type === "addons" ? item.addonId : undefined,  // ← fixed
                         menuId: item.menuId,
                         quantity: item.quantity,
                         price: price,
@@ -452,6 +455,7 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                         data: {
                             orderNumber: order.number,
                             productId: item.productId,
+                            addonId: item.addonId,
                             productVariantId: item.productVariantId,
                             Instructions: item.instructions,
                             menuId: item.menuId,
