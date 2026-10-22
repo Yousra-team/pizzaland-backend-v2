@@ -13,7 +13,8 @@ export const PREFERENCE_NAMES = [
   "marketingOptIn",
 ] as const;
 
-
+export const coinFormats = ["yousra","xaf"] as const;
+export const gender = ["Male", "Female" , "Other"] as const;
 
 
 // `verified` is not here on purpose: only the server decides if a customer is verified
@@ -57,4 +58,18 @@ export const userPreferenceSchema = z.object({
 export const AddresSchema = z.object({
    name : z.string(),
    shippingAddressName: z.string(),
+});
+
+export const sendYousraCoinsSchema = z.object({
+   customerPhone: z.e164(),
+   amount: z.number().positive(),
+   format: z.enum(coinFormats)
+});
+
+export const updateProfileSchema = z.object({
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  email: z.email().optional(),
+  gender: z.enum(gender).optional(), // must match the Prisma Gender enum
+  dateOfBirth: z.coerce.date().optional(), // JSON sends dates as strings, coerce turns them into Date
 });

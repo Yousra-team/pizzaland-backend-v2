@@ -1,7 +1,8 @@
-import { reviewSchema , favoriteSchema , userPreferenceSchema, AddresSchema } from "./crm.schema.js";
+import { reviewSchema , favoriteSchema , userPreferenceSchema, AddresSchema, creditSchema, sendYousraCoinsSchema, updateProfileSchema } from "./crm.schema.js";
 import * as z from "zod";
 import { Request, Response } from "express";
 import { prisma } from '../lib/prisma.js';
+import { convertToCurrency, convertToYousraCoins, creditAccount, debitAccount, getAccountBalance } from "./account.js";
 
 // All handlers below run after authMiddleware, so req.user is set.
 // For customers, req.user.userId is their phone number (see authentication.ts).
@@ -238,5 +239,202 @@ export const deleteAddress = async (req: Request , res: Response): Promise<void>
     } catch (error) {
         console.log("Deleting address failed", error)
         res.status(500).json({message: "Failed to find customers"})
+    }
+};
+
+export const myBalance = async(req: Request , res: Response): Promise<void> => {
+    try {
+         const phone = req.user.Id as string
+          
+         if(!phone) {
+            res.status(401).json({message:"You are not logged In"})
+            return;
+         }
+
+        const customer = await prisma.customers.findUnique({
+            where: {phone: phone},
+            include: {accounts: true}
+        })
+
+     if(!customer) {
+        res.status(404).json({message: "Customer does not exist or does not have an account"})
+        return;
+     }
+     
+     const YousraCoins = customer.accounts?.balance;
+
+     if(!YousraCoins) {
+        res.status(400).json({message:"There is no account or account balance found"})
+        return;
+     }
+
+     const balanceInXAF = convertToCurrency(YousraCoins)
+     
+     res.status(200).json({ XAF:balanceInXAF , Yousra: YousraCoins})
+
+    } catch (error) {
+       res.status(500).json({message:"An internal server error"})
+       console.log(error) 
+    }
+};
+
+export const myProfile = async (req: Request , res: Response): Promise<void> => {
+    try {
+        const phone = req.user.Id as string
+        
+        if(!phone) {
+            res.status(401).json({message: "There is no phone number associated"})
+            return;
+        }
+
+        const profile = await prisma.customers.findUnique({
+            where: {phone : phone},
+            include: {accounts: true}
+        });
+
+        if(!profile) {
+            res.status(404).json({message:"Could not find this profile"})
+            return;
+        }
+
+        res.status(201).json(profile);
+    } catch (error) {
+        res.status(500).json({message:"An internal error occurred"})
+        return;
+    }
+};
+
+
+export const sendYousraCoins = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const senderPhone = req.user?.Id;
+        if (!senderPhone) {
+            res.status(401).json({ error: { message: "The sender is not logged in" } });
+            return;
+        }
+
+        const result = sendYousraCoinsSchema.safeParse(req.body);
+        if (!result.success) {
+            const fieldErrors = z.flattenError(result.error);
+            res.status(400).json({
+                error: { message: "Invalid schema", fields: fieldErrors.fieldErrors }
+            });
+            return;
+        }
+
+        const receiverPhone = result.data.customerPhone;
+        let amount = result.data.amount;
+        const format = result.data.format;
+
+        if (format === "xaf") {
+            amount = convertToYousraCoins(amount);
+        }
+
+        if (amount <= 0) {
+            res.status(400).json({ error: { message: "Amount must be greater than zero" } });
+            return;
+        }
+
+        if (senderPhone === receiverPhone) {
+            res.status(400).json({ error: { message: "You cannot send coins to yourself" } });
+            return;
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await debitAccount(senderPhone, amount, tx);
+            await creditAccount(receiverPhone, amount, tx);
+        });
+
+        res.status(200).json({
+            data: {
+                message: "Transfer successful",
+                amount: amount,
+                to: receiverPhone
+            }
+        });
+
+    } catch (error) {
+        if (error instanceof Error) {
+            if (error.message === "Insufficient balance") {
+                res.status(400).json({ error: { message: "Insufficient balance" } });
+                return;
+            }
+            if (error.message === "Account not found") {
+                res.status(404).json({ error: { message: "Account not found" } });
+                return;
+            }
+        }
+        console.error("sendYousraCoins error:", error);
+        res.status(500).json({ error: { message: "Internal server error" } });
+    }
+};
+
+export const updateMyProfile = async (req: Request , res: Response): Promise<void> => {
+    try{
+         const result = updateProfileSchema.safeParse(req.body)
+         const user = req.user?.Id
+
+         if(!user) {
+            res.status(401).json({message: "You need to login"})
+            return;
+         }
+
+         if(!result.success) {
+            const fieldErrors = z.flattenError(result.error)
+            res.status(400).json({message: "An error occurred in updating my profile" , error: fieldErrors.fieldErrors})
+            return;
+         }
+
+         const newData = result.data;
+
+         const updatedProfile = await prisma.customers.update({
+             where: {phone : user},
+             data: newData
+         });
+
+         res.status(200).json({message: "Successfully Update" , data: updatedProfile})
+
+    }catch(error){
+       res.status(500).json({message: "Internal error occurred"})
+       console.log(error)
+    }
+};
+
+export const OpenMyAccount = async (req: Request , res: Response): Promise<void> => {
+    try {
+        const phone = req.user.Id
+        
+        if(!phone) {
+            res.status(401).json({message: "You need to log in and or provide a token"})
+            return;
+        }
+
+        const existingCustomer = await prisma.customers.findUnique({
+            where: {phone : phone},
+            include : {accounts: true},
+        });
+
+        if(!existingCustomer) {
+            res.status(404).json({message: "There is no user account for this number very sadly"})
+            return;
+        }
+
+        if (existingCustomer.accounts) {
+            res.status(400).json({message: "You already have an account"})
+            return;
+        };
+
+        const account = await prisma.accounts.create({
+            data: {
+                customerPhone: phone,
+                balance: 20,
+            }
+        });
+
+        res.status(200).json({message: "Account created", account})
+
+    } catch (error) {
+        res.status(500).json({message: "Internal server error"})
+        console.log(error)
     }
 };

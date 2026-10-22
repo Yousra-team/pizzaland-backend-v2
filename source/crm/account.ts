@@ -30,21 +30,27 @@ export const creditAccount = async (
     }
 };
 
-export const debitAccount = async (customerPhone: string, amount: number): Promise<void> => {
-    const result = accountSchema.safeParse({ customerPhone, amount });
+export const debitAccount = async (
+    customerPhone: string,
+    amount: number,
+    tx?: Prisma.TransactionClient
+): Promise<void> => {
+    const result = creditSchema.safeParse({ customerPhone, amount });
     if (!result.success) {
         throw new Error(`Invalid input: ${result.error.message}`);
     }
 
-    // Check and subtract in ONE query: only updates if the balance is high enough
-    const updated = await prisma.accounts.updateMany({
+    const db = tx ?? prisma;
+
+    const updated = await db.accounts.updateMany({
         where: { customerPhone: customerPhone, balance: { gte: amount } },
         data: { balance: { decrement: amount } },
     });
 
-    // count 0 means nothing was updated, so we find out why
     if (updated.count === 0) {
-        const account = await prisma.accounts.findUnique({ where: { customerPhone: customerPhone } });
+        const account = await db.accounts.findUnique({
+            where: { customerPhone: customerPhone }
+        });
         if (account) {
             throw new Error("Insufficient balance");
         }

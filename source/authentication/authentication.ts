@@ -35,7 +35,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
         await prisma.accounts.create({
             data: {
                 customerPhone: newCustomer.phone,
-                balance: 0,
+                balance: 20,
             },
         });
         
@@ -45,7 +45,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
         console.error("Error registering customer:", error);
         res.status(500).json({ error: "Failed to register customer" });
     }
-}
+};
 
 // This endpoint here is to register an employee, only accessible by admin and or manager
 export const registerEmployee = async (req: Request, res: Response): Promise<void> => {

@@ -27,6 +27,7 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
 
         // Step 2: find out who is ordering
         let actor: string;
+        
 
         if (req.user.role === "CUSTOMER") {
             actor = "CUSTOMER";
@@ -171,6 +172,8 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             let customerPhone: string | undefined;
             let employeeEmail: string | undefined;
             let guestName: string | undefined;
+            let cashierEmail: string | undefined;
+            let waiterEmail: string | undefined;
 
             if (actor === "CUSTOMER") {
                 customerPhone = req.user.Id;
@@ -180,8 +183,12 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 
             } else if (actor === "STAFF") {
                 customerPhone = data.customerPhone;
-                employeeEmail = req.user.Id;
-
+                if(req.user.role == "CASHIER") {
+                    cashierEmail = req.user.Id
+                } else if (req.user.role == "WAITER") {
+                    waiterEmail = req.user.Id
+                }
+                
             } else if (actor === "EMPLOYEE") {
                 employeeEmail = req.user.Id;
                 if (!employeeEmail) {
@@ -196,6 +203,8 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 data: {
                     branchId: branchId,
                     customerPhone: customerPhone,
+                    cashierEmail: cashierEmail,
+                    waitressEmail: waiterEmail,
                     employeeEmail: employeeEmail,
                     guestName: guestName,
                     discount: discount,

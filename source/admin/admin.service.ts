@@ -1,6 +1,8 @@
 import {Request , Response} from "express";
 import {prisma} from "../lib/prisma.js"
 import { fullOrderInclude } from "../orders/order.include.js";
+import { updateEmployeeSchema } from "./admin.schema.js";
+import * as z from "zod";
 
 export const getAllEmployees = async (req: Request , res: Response) => {
     try{
@@ -73,5 +75,33 @@ export const getAllOrders = async (req: Request, res: Response) => {
     } catch (error) {
         res.status(500).json({message:"An error occurred when finding ORDERS"})
        console.log(error)
+    }
+};
+
+// Update 
+
+export const updateEmployees = async (req: Request , res: Response) => {
+    try {
+         const result = updateEmployeeSchema.safeParse(req.body)
+         
+
+        if(!result.success) {
+          const fieldErrors = z.flattenError(result.error)
+          res.status(400).json({message: "An error occurred in updating an employee profile" , error: fieldErrors.fieldErrors})
+          return;
+        }
+       
+        const newData = result.data;
+
+        const updateProfile = await prisma.employees.update({
+            where: {phone : newData.phone},
+            data: newData
+        })
+
+        res.status(200).json({message:"Profile updated" , data: updateProfile})
+
+    } catch (error) {
+        res.status(500).json({message:"Internal server error"})
+        console.log(error)
     }
 };
