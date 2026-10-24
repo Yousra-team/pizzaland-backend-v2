@@ -4,9 +4,9 @@ import { CustomerSchema , employeeLoginSchema , employeeSchema , customerLoginSc
 import {createVerification, createVerificationCheck, sendMagicLinkToken, sendMagicLinkTokenFR} from "../notifications/index.js"
 import {signAccessToken, signRefreshToken, verifyRefreshToken, verifyAccessToken} from "./jwt.util.js";
 import {comparePassword, hashPassword} from "./bcrypt.util.js";
+import { CreateIdentifier } from "../utilities/counter.js";
 import * as z from "zod";
 import crypto from "crypto";
-
 
 
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
@@ -22,19 +22,29 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
         const existingCustomer = await prisma.customers.findUnique({
             where: {phone: customer.phone},
         });
+
         if (existingCustomer) {
             res.status(400).json({ error: "Customer already exists" });
             return;
         }
+        
+        const id = await CreateIdentifier("CUST");
+
+        if(!id) {
+            res.status(500).json({message: "Server error in creating Id"})
+            return;
+        };
+
         const newCustomer = await prisma.customers.create({
             data: {
+                Id: id,
                 ...customer
             },
         });
         
         await prisma.accounts.create({
             data: {
-                customerPhone: newCustomer.phone,
+                customerId: newCustomer.customerId,
                 balance: 20,
             },
         });
@@ -161,48 +171,21 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
         }
         
         if(channel == "sms")  {     
-            const verify = await createVerification(existingCustomer.phone)
-            res.status(200).json({message:"Cool verify first Buddy"})
-            console.log("You need to verify yourself", verify)
+            const verify = await createVerification(existingCustomer.phone , "sms")
+            res.status(200).json({message:" You just received an OTP sms code"})
+            console.log("Verify", verify)
             return;
         };
              
        if (channel == "whatsapp") {
-                 // Commented untill we finish testing
-           const token = crypto.randomBytes(32).toString("hex");
-           const sendToken =  await prisma.token.create({
-            data:{
-                token,
-                customerPhone: existingCustomer.phone,
-                type: "verificationToken",
-                expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes from now
-            },
-        });
-        
-        
-         // Get User language preference before sending the magic link token
-         const preference = await prisma.userPreferences.findFirst({
-             where: {
-                 customerPhone: existingCustomer.phone,
-                 name: "preferredLanguage",
-             },
-         });
-
-         const preferredLanguage = preference?.value ?? "fr"
-
-        if (preferredLanguage == "en") {
-             await sendMagicLinkToken({to: existingCustomer.phone, token: token, expiresIn: "5"})// change expiresIn from string to number
-             res.status(200).json({message:"verification code sent"})
-         } else {
-             await sendMagicLinkTokenFR({to: existingCustomer.phone, token: token, expiresIn: "5"})// change expiresIn from string to number
-             res.status(200).json({message:"code de vérification envoyé"})
-         }
-             return;
-             
+            const verify = await createVerification(existingCustomer.phone , "whatsapp")
+            res.status(200).json({message:" You just received an OTP whatsapp code"})
+            console.log("Verify", verify)
+            return;      
         };
 
-       
       res.status(200).json({message:"verification code sent" })
+
     }catch (error) {
         console.error("Error logging in customer:", error);
         res.status(500).json({ error: "Failed to login customer" });
@@ -213,90 +196,59 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
     try {
         const phone = req.body.phone
         const code = req.body.code
-        const token = req.body.token
-
-        if(!token) {
-            if (!phone || !code) {
-                res.status(403).json({message:" You need either phone and code or token"})
-                return;
-            }
-           
-           const verify = await createVerificationCheck(phone , code);
-        
-          if (verify.status !== "approved") {
-              res.status(403).json({message: "Wrong OTP or could not verify"});
-              return;
-           }
-
-
-             const authToken = await signAccessToken({Id: phone , role:"CUSTOMER"})
-             const refreshToken = await signRefreshToken({Id: phone, role:"CUSTOMER"})
-
-             await prisma.token.create({
-                  data:{
-                     token: refreshToken,
-                     customerPhone: phone,
-                     type: "refreshToken",
-                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-              }); 
-
-           // Refresh token goes in an httpOnly cookie — JS on the client can't read it
-             res.cookie("refreshToken", refreshToken, {
-                  httpOnly: true,
-                  secure: true,       // HTTPS only
-                  sameSite: "strict",
-                 maxAge: 7 * 24 * 60 * 60 * 1000,
-              });
-
-              res.status(200).json({message: "Customer verified" , authToken});
-              console.log("Verification Was Successful")
-              return;
+         
+        if(!phone || !code) {
+            res.status(400).json({message:"We need your four digit OTP code"})
+            console.log("No OTP or No Valid Phone number")
+            return
         };
+          
+        const verify = await createVerificationCheck(phone , code);
+        
+        if (verify.status !== "approved") {
+            res.status(403).json({message: "Wrong OTP or could not verify"});
+            console.log(verify)
+            return
+        }
 
-      const existingToken = await prisma.token.findUnique({
+        const customer = await prisma.customers.findUnique({
             where: {
-                token: token
+                phone : phone
             }
         });
 
-      if (!existingToken) {
-            res.status(400).json({ error: "Token has expired or is corrupted" });
-            return;
+        if(!customer) {
+            res.status(400).json({message: "No account tied to this phone number"})
+            return
         }
+              
+    const authToken = await signAccessToken({Id: customer.customerId , role:"CUSTOMER"})
+    const refreshToken = await signRefreshToken({Id: customer.customerId, role:"CUSTOMER"})
 
-     if (existingToken.expiresAt < new Date()) {
-            await prisma.token.delete({ where: { token: existingToken.token } });
-            res.status(400).json({ error: "Token has expired" });
-            return;
-        }
-    
-    // Later we might need admin to use this so future if / else
-    
-       const authToken = await signAccessToken({Id: phone , role:"CUSTOMER"})
-             const refreshToken = await signRefreshToken({Id: phone, role:"CUSTOMER"})
-
-             await prisma.token.create({
-                  data:{
-                     token: refreshToken,
-                     customerPhone: phone,
-                     type: "refreshToken",
-                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                },
-              }); 
+    await prisma.token.create({
+            data:{
+               token: refreshToken,
+               customerPhone: phone,
+               type: "refreshToken",
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            },
+        }); 
 
            // Refresh token goes in an httpOnly cookie — JS on the client can't read it
-             res.cookie("refreshToken", refreshToken, {
-                  httpOnly: true,
-                  secure: true,       // HTTPS only
-                  sameSite: "strict",
-                 maxAge: 7 * 24 * 60 * 60 * 1000,
-              });
-        res.status(200).json({authToken})
-  
+        res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: true,       // HTTPS only
+                sameSite: "strict",
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+         });
+
+        res.status(200).json({message: "Customer verified" , authToken});
+        console.log("Verification Was Successful")
+        return
+
     } catch (error) {
        console.error(error)
-       res.status(500).json({message:"Internal Error Occurred"})
+       res.status(500).json({message:"Internal error occurred while verifying"})
     }
 };
 
@@ -490,25 +442,4 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     }
 };
 
-export const UpdateCustomerAccount = async(req: Request , res: Response) => {
-    const customerPhone = req.user.id
-    
-    if(!customerPhone){
-      res.status(401).json({error:"You are not logged in"})
-      return;
-    }
-
-    try {
-      const result = CustomerSchema.omit({phone : true}).partial().strict().safeParse(req.body)
-      
-      if(!result.success){
-        const formattedErrors = z.flattenError(req.body)
-        res.status(403).json({message:"Schema error sorry", error: formattedErrors.fieldErrors})
-      }
-        
-    } catch (error) {
-        res.status(500).json({message:"Internal server error"})
-        console.log(error)
-    }
-};
 

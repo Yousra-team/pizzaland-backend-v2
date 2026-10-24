@@ -8,11 +8,11 @@ import { Prisma } from "../generated/prisma/client.js";
 // Money uses Prisma.Decimal (exact base-10 math) instead of number (binary floating point,
 // where 0.1 + 0.2 = 0.30000000000000004). The balance column is DECIMAL(14, 2).
 export const creditAccount = async (
-    customerPhone: string,
+    customerId: string,
     amount: number,
     tx?: Prisma.TransactionClient
 ): Promise<void> => {
-    const result = creditSchema.safeParse({ customerPhone, amount });
+    const result = creditSchema.safeParse({ customerId, amount });
     if (!result.success) {
         throw new Error(`Invalid input: ${result.error.message}`);
     }
@@ -21,7 +21,7 @@ export const creditAccount = async (
     const db = tx ?? prisma;
 
     const updated = await db.accounts.updateMany({
-        where: { customerPhone: customerPhone },
+        where: { customerId: customerId },
         data: { balance: { increment: amount } },
     });
 
@@ -31,11 +31,11 @@ export const creditAccount = async (
 };
 
 export const debitAccount = async (
-    customerPhone: string,
+    customerId: string,
     amount: number,
     tx?: Prisma.TransactionClient
 ): Promise<void> => {
-    const result = creditSchema.safeParse({ customerPhone, amount });
+    const result = creditSchema.safeParse({ customerId, amount });
     if (!result.success) {
         throw new Error(`Invalid input: ${result.error.message}`);
     }
@@ -43,13 +43,13 @@ export const debitAccount = async (
     const db = tx ?? prisma;
 
     const updated = await db.accounts.updateMany({
-        where: { customerPhone: customerPhone, balance: { gte: amount } },
+        where: { customerId: customerId, balance: { gte: amount } },
         data: { balance: { decrement: amount } },
     });
 
     if (updated.count === 0) {
         const account = await db.accounts.findUnique({
-            where: { customerPhone: customerPhone }
+            where: { customerId: customerId }
         });
         if (account) {
             throw new Error("Insufficient balance");
@@ -59,10 +59,10 @@ export const debitAccount = async (
 };
 
 // Returns a Decimal: use .toString() to send it in JSON without losing precision
-export const getAccountBalance = async (customerPhone: string) => {
+export const getAccountBalance = async (customerId: string) => {
     const account = await prisma.accounts.findUnique({
-        where: { customerPhone: customerPhone },
-        select: { customerPhone: true, balance: true },
+        where: { customerId: customerId},
+        select: { customerId: true, balance: true },
     });
 
     if (!account) {

@@ -1,12 +1,14 @@
+import { StringDecoder } from "node:string_decoder";
 import { client } from "./twilioClient.js";
+import { symlink } from "node:fs";
 
 const services: string = process.env.TWILIO_VERIFY_SERVICE!
 
-export const createVerification = async (to: string ) => {
+export const createVerification = async (to: string , channel: string) => {
   const verification = await client.verify.v2
     .services(services)
     .verifications.create({
-      channel: "sms",
+      channel: channel,
       to: to,
     });
 

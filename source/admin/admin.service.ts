@@ -3,6 +3,7 @@ import {prisma} from "../lib/prisma.js"
 import { fullOrderInclude } from "../orders/order.include.js";
 import { updateEmployeeSchema } from "./admin.schema.js";
 import * as z from "zod";
+import { updateProfileSchema } from "../crm/crm.schema.js";
 
 export const getAllEmployees = async (req: Request , res: Response) => {
     try{
@@ -105,3 +106,4 @@ export const updateEmployees = async (req: Request , res: Response) => {
         console.log(error)
     }
 };
+

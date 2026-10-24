@@ -6,7 +6,7 @@ import roleMiddleware from "../middlewares/role.middleware.js";
 
 const router = Router()
 
-router.get("/employees", authMiddleware , roleMiddleware("ADMIN","CASHIER", "MANAGER"),getAllEmployees) 
+router.get("/employees", authMiddleware , roleMiddleware("ADMIN"), getAllEmployees) 
 router.get("/products", authMiddleware , roleMiddleware("ADMIN"), getAllProducts)
 router.get("/addons", authMiddleware , roleMiddleware("ADMIN"), getAllAddons)
 router.get("/categories",authMiddleware , roleMiddleware("ADMIN"), getAllCategories)
@@ -15,6 +15,6 @@ router.get("/subcategories",authMiddleware , roleMiddleware("ADMIN"), getAllsubc
 router.get("/orders", authMiddleware , roleMiddleware("ADMIN"), getAllOrders)
 
 //update
-router.patch("/employees" ,authMiddleware , roleMiddleware("ADMIN","MANAGER"), updateEmployees)
+router.patch("/employees" ,authMiddleware , roleMiddleware("ADMIN"), updateEmployees)
 
 export default router

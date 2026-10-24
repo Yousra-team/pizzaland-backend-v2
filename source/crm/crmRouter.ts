@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
     addFavorite, addReview, addUserPreference,
-    getReviewsByProductId, getReviewsByCustomerPhone, getFavoritesByCustomerPhone, getUserPreferences,
+    getReviewsByProductId, getReviewsByCustomerId, getFavoritesByCustomerId, getUserPreferences,
     getCustomers,
     createAddress,
     getCustomerAddress,
@@ -22,9 +22,9 @@ router.get("/products/:productId/reviews", getReviewsByProductId);
 
 // CUSTOMER ONLY (favorites and reviews belong to customers)
 router.post("/favorites", authMiddleware, roleMiddleware("CUSTOMER"), addFavorite);
-router.get("/favorites", authMiddleware, roleMiddleware("CUSTOMER"), getFavoritesByCustomerPhone);
+router.get("/favorites", authMiddleware, roleMiddleware("CUSTOMER"), getFavoritesByCustomerId);
 router.post("/reviews", authMiddleware, roleMiddleware("CUSTOMER"), addReview);
-router.get("/reviews", authMiddleware, roleMiddleware("CUSTOMER"), getReviewsByCustomerPhone);
+router.get("/reviews", authMiddleware, roleMiddleware("CUSTOMER"), getReviewsByCustomerId);
 router.post("/address", authMiddleware , roleMiddleware("CUSTOMER"), createAddress)
 router.get("/address", authMiddleware , roleMiddleware("CUSTOMER"), getCustomerAddress)
 router.get("/profile", authMiddleware , myProfile)

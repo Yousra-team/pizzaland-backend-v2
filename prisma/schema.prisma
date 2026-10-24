@@ -1,10 +1,14 @@
-// Prisma schema — corrected & normalized
-// - Model names: PascalCase (DB table = snake_case via @@map)
-// - Field names: camelCase (DB column = snake_case via @map)
-// - Enums: PascalCase
-// - All relation mismatches fixed
-// - Status fields converted to enums
-// - Timestamps added to Orders
+// Prisma schema — Pizzaland V2
+// This revision adds:
+//   • OrderStatusHistory — audit of every order status change (who / when / from → to)
+//   • PointsTransaction — Yousra Points movements between customers and for order payments
+//   • Orders actor cleanup: dropped cashierEmail / waitressEmail (now captured by audit);
+//     kept the payroll-deduction customer field, renamed payrollEmployeeEmail for clarity
+//
+// Carried forward from the previous revision:
+//   • Customer PK is `customerId` (cuid); `phone` kept @unique
+//   • onDelete: Restrict on all customer-referencing FKs
+//   • onDelete: Cascade on order children (items, deliveries, pickup/dine-in, payments, promotions, status history)
 
 generator client {
   provider = "prisma-client"
@@ -147,34 +151,47 @@ enum orderItemType {
   product
 }
 
+enum countTypes {
+  CUST
+  DIN
+  DEL
+  DINE
+  PICKUP
+  YPTS
+  PAYMENT
+}
+
 // ─── Customer domain ──────────────────────────────────────────────────────────
 
 model Customers {
-  phone           String            @id
-  firstName       String            @map("first_name")
-  lastName        String?           @map("last_name")
-  email           String?           @unique
-  gender          Gender?
-  dateOfBirth     DateTime?         @map("date_of_birth")
-  accounts        Accounts?
-  orders          Orders[]
-  reservations    Reservations[]
-  promotions      PromotionUsage[]
-  addresses       Address[]
-  favorites       Favorites[]
-  reviews         Reviews[]
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
-  tokens          Token[]
-  userPreferences UserPreferences[]
+  customerId        String              @id @map("customer_id")
+  phone             String              @unique
+  firstName         String              @map("first_name")
+  lastName          String?             @map("last_name")
+  email             String?             @unique
+  gender            Gender?
+  dateOfBirth       DateTime?           @map("date_of_birth")
+  accounts          Accounts?
+  orders            Orders[]
+  reservations      Reservations[]
+  promotions        PromotionUsage[]
+  addresses         Address[]
+  favorites         Favorites[]
+  reviews           Reviews[]
+  pointsSent        PointsTransaction[] @relation("PointsSent")
+  pointsReceived    PointsTransaction[] @relation("PointsReceived")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  tokens            Token[]
+  userPreferences   UserPreferences[]
 
   @@map("customers")
 }
 
 model UserPreferences {
   id            String         @id @default(uuid())
-  customer      Customers?     @relation(fields: [customerPhone], references: [phone])
-  customerPhone String?        @map("customer_phone")
+  customer      Customers?     @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId    String?        @map("customer_id")
   employee      Employees?     @relation(fields: [employeeEmail], references: [email])
   employeeEmail String?        @map("employee_email")
   name          preferenceName
@@ -182,15 +199,15 @@ model UserPreferences {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
 
-  @@unique([customerPhone, name]) // one preference of each type per customer
-  @@index([customerPhone])
+  @@unique([customerId, name]) // one preference of each type per customer
+  @@index([customerId])
   @@map("user_preferences")
 }
 
 model Token {
   token         String     @id
-  customer      Customers? @relation(fields: [customerPhone], references: [phone])
-  customerPhone String?    @map("customer_phone")
+  customer      Customers? @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId    String?    @map("customer_id")
   employee      Employees? @relation(fields: [employeeEmail], references: [email])
   employeeEmail String?    @map("employee_email")
   employeeRole  Role?      @map("employee_role")
@@ -200,16 +217,16 @@ model Token {
   createdAt     DateTime   @default(now()) @map("created_at")
   updatedAt     DateTime   @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
+  @@index([customerId])
   @@index([employeeEmail])
   @@map("tokens")
 }
 
 model Accounts {
-  customerPhone String    @id @unique @map("customer_phone")
-  balance       Float     @default(0)
-  customer      Customers @relation(fields: [customerPhone], references: [phone])
-  createdAt     DateTime  @default(now()) @map("created_at")
+  customerId String    @id @unique @map("customer_id")
+  balance    Float     @default(0)
+  customer   Customers @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  createdAt  DateTime  @default(now()) @map("created_at")
 
   @@map("accounts")
 }
@@ -217,47 +234,47 @@ model Accounts {
 model Address {
   id                  String            @id @default(uuid())
   name                String?
-  customer            Customers         @relation(fields: [customerPhone], references: [phone])
-  customerPhone       String            @map("customer_phone")
+  customer            Customers         @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId          String            @map("customer_id")
   shippingAddress     ShippingAddresses @relation(fields: [shippingAddressName], references: [name])
   shippingAddressName String            @map("shipping_address_name")
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
+  @@index([customerId])
   @@map("addresses")
 }
 
 model Favorites {
-  id            String    @id @default(uuid())
-  customer      Customers @relation(fields: [customerPhone], references: [phone])
-  customerPhone String    @map("customer_phone")
-  product       Products  @relation(fields: [productId], references: [id])
-  productId     String    @map("product_id")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id         String    @id @default(uuid())
+  customer   Customers @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId String    @map("customer_id")
+  product    Products  @relation(fields: [productId], references: [id])
+  productId  String    @map("product_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
-  @@unique([customerPhone, productId]) // a customer can favorite a product only once
+  @@unique([customerId, productId]) // a customer can favorite a product only once
   @@index([productId])
   @@map("favorites")
 }
 
 model Reviews {
-  id            String      @id @default(uuid())
-  customer      Customers   @relation(fields: [customerPhone], references: [phone])
-  customerPhone String      @map("customer_phone")
-  product       Products?   @relation(fields: [productId], references: [id])
-  productId     String?     @map("product_id")
-  order         Orders?     @relation(fields: [orderNumber], references: [number])
-  orderNumber   String?
-  deliveries    Deliveries? @relation(fields: [deliveryId], references: [id])
-  deliveryId    String?
-  rating        Int
-  comment       String?
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  id          String      @id @default(uuid())
+  customer    Customers   @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId  String      @map("customer_id")
+  product     Products?   @relation(fields: [productId], references: [id])
+  productId   String?     @map("product_id")
+  order       Orders?     @relation(fields: [orderNumber], references: [number])
+  orderNumber String?
+  deliveries  Deliveries? @relation(fields: [deliveryId], references: [id])
+  deliveryId  String?
+  rating      Int
+  comment     String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
+  @@index([customerId])
   @@index([productId])
   @@map("reviews")
 }
@@ -265,25 +282,24 @@ model Reviews {
 // ─── Employee & branch domain ─────────────────────────────────────────────────
 
 model Employees {
-  email           String            @id
-  firstName       String            @map("first_name")
-  lastName        String?           @map("last_name")
-  phone           String            @unique
-  password        String
-  role            Role
-  branch          Branches?         @relation("BranchEmployees", fields: [branchId], references: [id])
-  branchId        String?           @map("branch_id")
-  managedBranch   Branches?         @relation("BranchManager")
-  verified        Boolean           @default(false)
-  stationSessions StationSessions[]
-  deliveries      Deliveries[]
-  cashierOrders   Orders[]          @relation("CashierOrders")
-  waitressOrders  Orders[]          @relation("WaitressOrders")
-  employeeOrders  Orders[]          @relation("EmployeeOrders")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
-  tokens          Token[]
-  userPreferences UserPreferences[]
+  email                String                 @id
+  firstName            String                 @map("first_name")
+  lastName             String?                @map("last_name")
+  phone                String                 @unique
+  password             String
+  role                 Role
+  branch               Branches?              @relation("BranchEmployees", fields: [branchId], references: [id])
+  branchId             String?                @map("branch_id")
+  managedBranch        Branches?              @relation("BranchManager")
+  verified             Boolean                @default(false)
+  stationSessions      StationSessions[]
+  deliveries           Deliveries[]
+  payrollOrders        Orders[]               @relation("PayrollEmployeeOrders")
+  orderStatusChanges   OrderStatusHistory[]
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  tokens               Token[]
+  userPreferences      UserPreferences[]
 
   @@index([branchId])
   @@map("employees")
@@ -312,7 +328,6 @@ model Branches {
 // ─── Catalog domain ───────────────────────────────────────────────────────────
 
 model Category {
-  // make the name of categories as id
   id            String        @id @default(uuid())
   name          String
   description   String
@@ -500,40 +515,60 @@ model ShippingAddresses {
 }
 
 // ─── Order domain ─────────────────────────────────────────────────────────────
+// Note: cashierEmail / waitressEmail dropped — "who placed this order" is now
+// captured by the first OrderStatusHistory row (fromStatus=null → toStatus=pending).
+// `payrollEmployeeEmail` identifies an employee who IS the customer of the order
+// (self-order paid by payroll deduction), not the staff member who placed it.
 model Orders {
-  number        String           @id @default(uuid()) @map("number")
-  branch        Branches         @relation(fields: [branchId], references: [id])
-  branchId      String           @map("branch_id")
-  cashier       Employees?       @relation(name: "CashierOrders", fields: [cashierEmail], references: [email])
-  cashierEmail  String?          @map("cashier_email")
-  waitress      Employees?       @relation(name: "WaitressOrders", fields: [waitressEmail], references: [email])
-  waitressEmail String?          @map("waitress_email")
-  customer      Customers?       @relation(fields: [customerPhone], references: [phone])
-  customerPhone String?          @map("customer_phone") // null = walk-in customer
-  employee      Employees?       @relation(name: "EmployeeOrders", fields: [employeeEmail], references: [email])
-  employeeEmail String?          @map("employee_email")
-  guestName     String?          @map("Guest Name")
-  guestPhone    String?          @map("Guest Phone")
-  discount      Float            @default(0)
-  subtotal      Float            @map("subtotal")
-  status        orderstatus      @default(pending)
-  total         Float            @map("total")
-  orderType     orderType        @map("order_type")
-  items         OrderItems[]
-  deliveries    Deliveries[]
-  pickupOrders  PickupOrders[]
-  dineInOrders  DineInOrders[]
-  Payments      Payments[]
-  promotions    PromotionUsage[]
-  reviews       Reviews[]
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
+  number               String                @id @map("number")
+  branch               Branches              @relation(fields: [branchId], references: [id])
+  branchId             String                @map("branch_id")
+  customer             Customers?            @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId           String?               @map("customer_id") // null = walk-in or employee self-order
+  payrollEmployee      Employees?            @relation(name: "PayrollEmployeeOrders", fields: [payrollEmployeeEmail], references: [email])
+  payrollEmployeeEmail String?               @map("payroll_employee_email") // employee ordering for themselves (payroll deduction)
+  guestName            String?               @map("Guest Name")
+  guestPhone           String?               @map("Guest Phone")
+  discount             Float                 @default(0)
+  subtotal             Float                 @map("subtotal")
+  status               orderstatus           @default(pending)
+  total                Float                 @map("total")
+  orderType            orderType             @map("order_type")
+  items                OrderItems[]
+  deliveries           Deliveries[]
+  pickupOrders         PickupOrders[]
+  dineInOrders         DineInOrders[]
+  Payments             Payments[]
+  promotions           PromotionUsage[]
+  reviews              Reviews[]
+  statusHistory        OrderStatusHistory[]
+  pointsPayments       PointsTransaction[]
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
-  @@index([cashierEmail])
+  @@index([customerId])
+  @@index([payrollEmployeeEmail])
   @@index([branchId])
-  @@index([employeeEmail])
   @@map("orders")
+}
+
+// Append-only log of every order status transition.
+// Written in the same $transaction as the status update on Orders.
+// First row for a new order: fromStatus = null, toStatus = pending,
+//   changedByEmail = whoever placed it (cashier/waitress/employee).
+model OrderStatusHistory {
+  id             String       @id 
+  order          Orders       @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
+  orderNumber    String       @map("order_number")
+  fromStatus     orderstatus? @map("from_status") // null = order creation
+  toStatus       orderstatus  @map("to_status")
+  changedBy      Employees?   @relation(fields: [changedByEmail], references: [email])
+  changedByEmail String?      @map("changed_by_email")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([orderNumber])
+  @@index([changedByEmail])
+  @@map("order_status_history")
 }
 
 model OrderItems {
@@ -564,7 +599,7 @@ model OrderItems {
 }
 
 model Deliveries {
-  id                    String            @id @default(uuid())
+  id                    String            @id 
   order                 Orders            @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber           String            @map("order_number")
   driver                Employees?        @relation(fields: [driverEmail], references: [email])
@@ -587,7 +622,7 @@ model Deliveries {
 }
 
 model PickupOrders {
-  id          String   @id @default(uuid())
+  id          String   @id 
   order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   pickupTime  DateTime @map("pickup_time")
@@ -599,7 +634,7 @@ model PickupOrders {
 }
 
 model DineInOrders {
-  id          String   @id @default(uuid())
+  id          String   @id 
   order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   table       Table?   @relation(fields: [tableId], references: [id])
@@ -614,54 +649,50 @@ model DineInOrders {
 // ─── Payment domain ───────────────────────────────────────────────────────────
 
 model Payments {
-  id                   String                @id @default(uuid())
-  order                Orders                @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
+  id          String         @id 
+  order       Orders         @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   // Removed @unique: an order may have multiple payment attempts
-  orderNumber          String                @map("order_number")
-  amount               Float
-  method               paymentMethods
-  provider             String
-  status               String
-  monetbillTransaction MonetbillTransaction?
-  createdAt            DateTime              @default(now()) @map("created_at")
-  updatedAt            DateTime              @updatedAt @map("updated_at")
+  orderNumber String         @map("order_number")
+  amount      Float
+  method      paymentMethods
+  provider    String
+  status      String
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
 
   @@index([orderNumber])
   @@map("order_payments")
 }
 
-model MonetbillTransaction {
-  id                    String   @id @default(uuid())
-  orderPayment          Payments @relation(fields: [orderPaymentId], references: [id], onDelete: Cascade)
-  orderPaymentId        String   @unique @map("order_payment_id")
-  reference             String
-  transactionId         String   @map("transaction_id")
-  transactionUuid       String   @map("transaction_uuid")
-  amount                Float
-  fee                   Float
-  currency              String
-  provider              String
-  status                String
-  customerName          String   @map("customer_name")
-  customerNumber        String   @map("customer_number")
-  message               String?
-  mccmc                 String?
-  operator              String?
-  operatorCode          String?  @map("operator_code")
-  operatorTransactionId String?  @map("operator_transaction_id")
-  sign                  String
-  createdAt             DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+// ─── Yousra Points (customer) ─────────────────────────────────────────────────
+// One row per points movement. Row-reading:
+//   • Transfer A → B           : fromCustomerId=A, toCustomerId=B,    orderNumber=null
+//   • Pay for order (spend)    : fromCustomerId=A, toCustomerId=null, orderNumber=<order>
+//   • System credit (earn/grant): fromCustomerId=null, toCustomerId=A, orderNumber=null
+model PointsTransaction {
+  id             String     @id @default(uuid())
+  amount         Float
+  fromCustomer   Customers? @relation("PointsSent", fields: [fromCustomerId], references: [customerId], onDelete: Restrict)
+  fromCustomerId String?    @map("from_customer_id")
+  toCustomer     Customers? @relation("PointsReceived", fields: [toCustomerId], references: [customerId], onDelete: Restrict)
+  toCustomerId   String?    @map("to_customer_id")
+  order          Orders?    @relation(fields: [orderNumber], references: [number])
+  orderNumber    String?    @map("order_number")
+  note           String?
+  createdAt      DateTime   @default(now()) @map("created_at")
 
-  @@map("monetbill_transactions")
+  @@index([fromCustomerId])
+  @@index([toCustomerId])
+  @@index([orderNumber])
+  @@map("points_transactions")
 }
 
 // ─── Reservation domain ───────────────────────────────────────────────────────
 
 model Reservations {
   id              String            @id @default(uuid())
-  customer        Customers         @relation(fields: [customerPhone], references: [phone])
-  customerPhone   String            @map("customer_phone")
+  customer        Customers         @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId      String            @map("customer_id")
   reservationDate DateTime          @map("reservation_date")
   reservationTime DateTime          @map("reservation_time")
   comments        String?
@@ -672,7 +703,7 @@ model Reservations {
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
-  @@index([customerPhone])
+  @@index([customerId])
   @@index([branchId])
   @@map("reservations")
 }
@@ -725,20 +756,20 @@ model PromotionBenefit {
 }
 
 model PromotionUsage {
-  id            String    @id @default(uuid())
-  promotion     Promotion @relation(fields: [promotionId], references: [id])
-  promotionId   String    @map("promotion_id")
-  order         Orders    @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
-  orderNumber   String    @map("order_number")
-  customer      Customers @relation(fields: [customerPhone], references: [phone])
-  customerPhone String    @map("customer_phone")
-  usedAt        DateTime  @default(now()) @map("used_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id          String    @id @default(uuid())
+  promotion   Promotion @relation(fields: [promotionId], references: [id])
+  promotionId String    @map("promotion_id")
+  order       Orders    @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
+  orderNumber String    @map("order_number")
+  customer    Customers @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId  String    @map("customer_id")
+  usedAt      DateTime  @default(now()) @map("used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@index([promotionId])
   @@index([orderNumber])
-  @@index([customerPhone])
+  @@index([customerId])
   @@map("promotion_usages")
 }
 
@@ -759,4 +790,11 @@ model Floor {
   branchId String   @map("Branch ID")
 
   tables Table[]
+}
+
+model Counter {
+  id    String     @id @default(uuid())
+  type  countTypes
+  day   Int
+  count Int
 }

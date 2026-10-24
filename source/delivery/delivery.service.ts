@@ -146,7 +146,7 @@ export const findDrivers = async (req: Request , res: Response): Promise<void> =
 // ── 2. Driver claims a delivery ──
 export const claimDelivery = async (req: Request, res: Response): Promise<void> => {
     const email = req.user.Id;
-    const deliveryId = req.params.deliveryId;
+    const deliveryId = req.params.deliveryId as String;
 
     if (typeof deliveryId !== "string" || !email) {
         res.status(400).json({ error: { message: "Invalid request", code: "INVALID_PARAM" } });
@@ -243,25 +243,26 @@ export const getMyDeliveries = async (req: Request, res: Response): Promise<void
     }
 };
 
-
 // ── 4. Driver updates one of their deliveries ──
 //    assigned → in_transit (picked up), then assigned/in_transit → delivered or failed
 export const updateDeliveryStatus = async (req: Request, res: Response): Promise<void> => {
-    const email = req.user?.userId;
-    const deliveryId = req.params.deliveryId;
+    const email = req.user?.Id;
+    const deliveryId = req.params.deliveryId as String;
 
     if (typeof deliveryId !== "string" || !email) {
-        res.status(400).json({ error: { message: "Invalid request", code: "INVALID_PARAM" } });
+        res.status(400).json({ error: { message: "Invalid request"} });
         return;
     }
 
     const result = deliveryStatusSchema.safeParse(req.body);
+
     if (!result.success) {
         res.status(400).json({
             error: { message: "Invalid status", code: "INVALID_BODY", details: z.flattenError(result.error).fieldErrors },
         });
         return;
     }
+
     const { status } = result.data;
 
     try {

@@ -13,6 +13,8 @@ export const roles = [ "ADMIN",
         "FINANCE",
         "CONTROLLER"] as const;
 
+export const gender = ["Male", "Female" , "Other"] as const;
+
 export  const employeeSchema = z.object({
     firstName: z.string().min(1, "First name is required").max(50, "First name must be at most 50 characters"),
     lastName: z.string().min(1, "Last name is required").max(50, "Last name must be at most 50 characters"),

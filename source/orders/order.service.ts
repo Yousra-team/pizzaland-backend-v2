@@ -5,6 +5,7 @@ import { createOrderSchema , orderStatusQuerySchema , statusEnum , orderItemSche
 import { fullOrderInclude } from "./order.include.js";
 import * as z from "zod";
 import { creditAccount , convertToYousraCoins } from "../crm/account.js";
+import { CreateIdentifier } from "../utilities/counter.js";
 
 
 // Helper Functions
@@ -239,8 +240,17 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                 if (!estimatedDeliveryTime) {
                     throw new Error("Estimated delivery time missing");
                 }
+                
+                const deliveryId = await CreateIdentifier("DEL");
+
+                if(!deliveryId) {
+                    res.status(400).json("Unable to create a delivery Identifier")
+                    return
+                }
+
                 await tx.deliveries.create({
                     data: {
+                        id: deliveryId,
                         orderNumber: order.number,
                         shippingAddressName: data.shippingAddressName,
                         status: "pending",
@@ -250,8 +260,17 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             }
 
             if (data.orderType === "pickup") {
+
+                const pickupId = await CreateIdentifier("PICKUP")
+                
+                if(!pickupId) {
+                    res.status(500).json({message: "Unable to create a pickup Identifier"})
+                    return
+                }
+
                 await tx.pickupOrders.create({
                     data: {
+                        id : pickupId,
                         orderNumber: order.number,
                         pickupTime: data.pickupTime,
                     },
@@ -259,9 +278,18 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             }
 
             if (data.orderType === "dineIn") {
+               
+                const dineId = await CreateIdentifier("DINE")
+
+                if(!dineId) {
+                    res.status(500).json({message: "Unable to create a dine In Identifier"})
+                    return
+                }
+
                await tx.dineInOrders.create({
                     data: {
-                      orderNumber: order.number,
+                    id : dineId,
+                    orderNumber: order.number,
                     tableId: data.tableId,
            },
          });
@@ -269,16 +297,24 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
              // Reward: 10% of the order total in Yousra coins
             // customerPhone is only set for CUSTOMER and STAFF orders
        if (customerPhone) {
-               const account = await tx.accounts.findUnique({
-                where: { customerPhone: customerPhone },
-          });
+                 const customer =  await tx.customers.findUnique({
+                    where : {phone : customerPhone},
+                    include : {accounts : true}
+                 })
+
+                 if (!customer) {
+                    res.status(400).json({message: " Wrong or invalid phone number"})
+                    return
+                 }
+
+                 const account = customer.accounts
 
                 if (account) {
                      const coins = convertToYousraCoins(0.1 * total);
 
                // a very small order can round down to 0 coins
                 if (coins > 0) {
-                     await creditAccount(customerPhone, coins, tx);
+                     await creditAccount(customer.customerId, coins, tx);
             }
               }
          }
@@ -482,8 +518,16 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                     if (!estimatedDeliveryTime) {
                         throw new Error("Estimated delivery time missing");
                     }
+                    const deliveryId = await CreateIdentifier("DEL");
+
+                      if(!deliveryId) {
+                          res.status(400).json("Unable to create a delivery Identifier")
+                          return
+                       }
+
                     await tx.deliveries.create({
                         data: {
+                            id: deliveryId,
                             orderNumber: order.number,
                             shippingAddressName: data.shippingAddressName,
                             status: "pending",
@@ -493,8 +537,16 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                 }
 
                 if (data.orderType === "pickup") {
+
+                 const pickupId = await CreateIdentifier("PICKUP")
+                
+                  if(!pickupId) {
+                     res.status(500).json({message: "Unable to create a pickup Identifier"})
+                     return
+                  }
                     await tx.pickupOrders.create({
                         data: {
+                            id: pickupId,
                             orderNumber: order.number,
                             pickupTime: data.pickupTime,
                         },
@@ -510,8 +562,16 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                         throw new Error("Table not found");
                     }
 
+                const dineId = await CreateIdentifier("DINE")
+
+                if(!dineId) {
+                    res.status(500).json({message: "Unable to create a dine In Identifier"})
+                    return
+                }
+
                     await tx.dineInOrders.create({
                         data: {
+                            id: dineId,
                             orderNumber: order.number,
                             tableId: data.tableId,
                         },

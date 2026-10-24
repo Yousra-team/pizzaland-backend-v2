@@ -38,12 +38,12 @@ export const reviewSchema = z.object({
 });
 
 export const accountSchema = z.object({
-  customerPhone: z.e164(),
+  customerId: z.string(),
   balance: z.number().positive(),
 });
 
 export const creditSchema = z.object({
-    customerPhone: z.e164(),
+    customerId: z.string(),
     amount: z.number().positive(),
 });
 
@@ -67,9 +67,10 @@ export const sendYousraCoinsSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
+  phone: z.e164().optional(),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
-  email: z.email().optional(),
-  gender: z.enum(gender).optional(), // must match the Prisma Gender enum
-  dateOfBirth: z.coerce.date().optional(), // JSON sends dates as strings, coerce turns them into Date
+  email: z.email().optional().nullable(),
+  gender: z.enum(gender).optional().nullable(), // must match the Prisma Gender enum
+  dateOfBirth: z.coerce.date().optional().nullable(), // JSON sends dates as strings, coerce turns them into Date
 });
