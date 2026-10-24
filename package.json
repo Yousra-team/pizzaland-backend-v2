@@ -39,7 +39,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/luxon": "^3.7.6",
     "@types/multer": "^2.1.0",
-    "@types/node": "^25.9.8",
+    "@types/node": "^25.9.9",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.1",
     "dotenv-cli": "^11.0.0",
