@@ -9,7 +9,11 @@ import { CreateIdentifier } from "../utilities/counter.js";
 
 
 // Helper Functions
-
+class HttpError extends Error {
+    constructor(public status: number, message: string) {
+        super(message);
+    }
+}
 
 // CREATE ENDPOINTS
 
@@ -27,24 +31,34 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
         const data = result.data;
 
         // Step 2: find out who is ordering
-        let actor: string;
-        
+        let actor: "CUSTOMER" | "STAFF" | "EMPLOYEE";
 
         if (req.user.role === "CUSTOMER") {
             actor = "CUSTOMER";
         } else if (data.customerPhone) {
             actor = "STAFF";      // staff ordering on behalf of a customer
         } else {
-            actor = "EMPLOYEE";   // staff ordering for themselves
+            actor = "EMPLOYEE";   // staff ordering for themselves (payroll)
         }
 
         // Step 3: everything below runs in one transaction
         const newOrder = await prisma.$transaction(async (tx) => {
 
-            // Step 4: loop through the items, get prices and prep times
+            // Step 4: price items & track prep time
             let subtotal = 0;
             let longestPrepTime = 0;
-            const itemsToCreate = [];
+            const itemsToCreate: Array<{
+                productId?: string;
+                productVariantId?: string;
+                addonId?: string;
+                menuId?: string;
+                instructions?: string;
+                quantity: number;
+                price: number;
+                type: "product" | "menu" | "addons";
+                status: "pending";
+                estimatedReadyAt: Date;
+            }> = [];
 
             for (const item of data.items) {
                 let price: number | undefined;
@@ -55,9 +69,8 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                         where: { id: item.productId! },
                         select: { price: true, preparationTime: true },
                     });
-                    if (!product) {
-                        throw new Error("Product not found");
-                    }
+                    if (!product) throw new HttpError(404, "Product not found");
+
                     price = product.price;
                     prepTime = product.preparationTime ?? 0;
 
@@ -67,47 +80,40 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                             select: { price: true, productId: true },
                         });
                         if (!variant || variant.productId !== item.productId) {
-                            throw new Error("Variant does not belong to this product");
+                            throw new HttpError(400, "Variant does not belong to this product");
                         }
                         price = variant.price;
                     }
                 }
 
                 if (item.type === "menu") {
-                  const menu = await tx.menu.findUnique({
-                         where: { id: item.menuId! },
-                         select: { price: true, preparationTime: true },
-                         });
-                         if (!menu) {
-                          throw new Error("Menu not found");
-                       }
-                      price = menu.price;
-                      prepTime = menu.preparationTime ?? 0;
-                    
-                 }
+                    const menu = await tx.menu.findUnique({
+                        where: { id: item.menuId! },
+                        select: { price: true, preparationTime: true },
+                    });
+                    if (!menu) throw new HttpError(404, "Menu not found");
+
+                    price = menu.price;
+                    prepTime = menu.preparationTime ?? 0;
+                }
 
                 if (item.type === "addons") {
                     const addon = await tx.addons.findUnique({
                         where: { id: item.addonId! },
                         select: { price: true },
                     });
-                    if (!addon) {
-                        throw new Error("Addon not found");
-                    }
+                    if (!addon) throw new HttpError(404, "Addon not found");
+
                     price = addon.price;
                 }
 
                 if (price === undefined) {
-                    throw new Error(`Price not found for item type ${item.type}`);
+                    throw new HttpError(400, `Price not found for item type ${item.type}`);
                 }
 
                 subtotal += price * item.quantity;
+                if (prepTime > longestPrepTime) longestPrepTime = prepTime;
 
-                if (prepTime > longestPrepTime) {
-                    longestPrepTime = prepTime;
-                }
-
-                // Save this item's data, we create it after the order exists
                 itemsToCreate.push({
                     productId: item.productId,
                     productVariantId: item.productVariantId,
@@ -115,17 +121,16 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                     menuId: item.menuId,
                     instructions: item.instructions,
                     quantity: item.quantity,
-                    price: price,
+                    price,
                     type: item.type,
                     status: "pending" as const,
                     estimatedReadyAt: new Date(Date.now() + prepTime * 60 * 1000),
                 });
             }
 
-            // Round to avoid floating point issues
             subtotal = Math.round(subtotal);
 
-            // Step 5: find the branch, delivery fee and estimated delivery time
+            // Step 5: branch, delivery fee, estimated delivery
             let deliveryFee = 0;
             let estimatedDeliveryTime: Date | null = null;
             let branchId: string;
@@ -135,118 +140,117 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                     where: { name: data.shippingAddressName },
                     select: { deliveryFee: true, deliveryTime: true, branchId: true },
                 });
-
-                if (!shippingAddress) {
-                    throw new Error("Shipping address not found");
-                }
+                if (!shippingAddress) throw new HttpError(404, "Shipping address not found");
 
                 deliveryFee = shippingAddress.deliveryFee;
                 branchId = shippingAddress.branchId;
 
-                // kitchen time + delivery time = total minutes
                 const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
                 estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
+
             } else if (data.orderType === "dineIn") {
-                 const table = await tx.table.findUnique({
+                const table = await tx.table.findUnique({
                     where: { id: data.tableId },
-                    select: { floorId: true , floor: { select: { branchId: true } } },
+                    select: { floorId: true, floor: { select: { branchId: true } } },
                 });
+                if (!table) throw new HttpError(404, "Table not found");
+                branchId = table.floor.branchId;
 
-                    if (!table) {
-                    throw new Error("Table not found");
-                    }
-
-                    branchId = table.floor.branchId;
             } else {
-                if (!data.branchId) {
-                    throw new Error("branchId is required for dine-in orders");
-                }
-                //pickup  
+                // pickup
+                if (!data.branchId) throw new HttpError(400, "branchId is required for pickup orders");
                 branchId = data.branchId;
             }
 
-            // Step 6: totals (promotions will come later)
+            // Step 6: totals
             const discount = 0;
             const total = subtotal - discount + deliveryFee;
 
-            // Step 7: work out who the order belongs to
-            let customerPhone: string | undefined;
-            let employeeEmail: string | undefined;
-            let guestName: string | undefined;
-            let cashierEmail: string | undefined;
-            let waiterEmail: string | undefined;
+            // Step 7: who owns the order & who placed it
+            let customerId: string | undefined;
+            let payrollEmployeeEmail: string | undefined;
+            let placedByEmail: string | null = null;   // for OrderStatusHistory.changedByEmail
 
             if (actor === "CUSTOMER") {
-                customerPhone = req.user.Id;
-                if (!customerPhone) {
-                    throw new Error("Customer phone not found");
-                }
-                
+                customerId = req.user.Id;
+                if (!customerId) throw new HttpError(401, "Customer id missing from token");
+                // placedByEmail stays null — the customer placed it, not an employee
+
             } else if (actor === "STAFF") {
-                customerPhone = data.customerPhone;
-                if(req.user.role == "CASHIER") {
-                    cashierEmail = req.user.Id
-                } else if (req.user.role == "WAITER") {
-                    waiterEmail = req.user.Id
+                placedByEmail = req.user.Id;
+
+                const customer = await tx.customers.findUnique({
+                    where: { phone: data.customerPhone },
+                    select: { customerId: true },
+                });
+                if (!customer) {
+                    throw new HttpError(400, "Invalid or inexistent customer phone number");
                 }
-                
-            } else if (actor === "EMPLOYEE") {
-                employeeEmail = req.user.Id;
-                if (!employeeEmail) {
-                    throw new Error("Employee email not found");
-                }
+                customerId = customer.customerId;
+
             } else {
-                guestName = data.guestName;
+                // EMPLOYEE — payroll self-order
+                payrollEmployeeEmail = req.user.Id;
+                if (!payrollEmployeeEmail) throw new HttpError(401, "Employee email missing from token");
+                placedByEmail = payrollEmployeeEmail;   // employee placed it themselves
             }
 
-            // Step 8: create the order ONCE
+            // Step 8: create the order
+            const number = await CreateIdentifier("ORD");
+            if (!number) throw new HttpError(500, "Could not create order identifier");
+
             const order = await tx.orders.create({
                 data: {
-                    branchId: branchId,
-                    customerPhone: customerPhone,
-                    cashierEmail: cashierEmail,
-                    waitressEmail: waiterEmail,
-                    employeeEmail: employeeEmail,
-                    guestName: guestName,
-                    discount: discount,
-                    subtotal: subtotal,
-                    total: total,
+                    number,
+                    branchId,
+                    customerId,
+                    payrollEmployeeEmail,
+                    discount,
+                    subtotal,
+                    total,
                     status: "pending",
                     orderType: data.orderType,
                 },
             });
 
-            // Step 9: create the order items
-            for (const item of itemsToCreate) {
-                await tx.orderItems.create({
-                    data: {
-                        orderNumber: order.number,
-                        productId: item.productId,
-                        productVariantId: item.productVariantId,
-                        Instructions: item.instructions,
-                        menuId: item.menuId,
-                        addonId: item.type === "addons" ? item.addonId : undefined,  // ← add
-                        quantity: item.quantity,
-                        price: item.price,
-                        type: item.type,
-                        status: item.status,
-                        estimatedReadyAt: item.estimatedReadyAt,
-                    },
-                });
-            }
+            // Step 8b: first OrderStatusHistory row — fromStatus=null, toStatus=pending
+            // id has no default in schema, so we generate one
+            const historyId = await CreateIdentifier("OSH");
+            if (!historyId) throw new HttpError(500, "Could not create history identifier");
 
-            // Step 10: create the extra row depending on the order type
+            await tx.orderStatusHistory.create({
+                data: {
+                    id: historyId,
+                    orderNumber: order.number,
+                    fromStatus: null,            // null = order creation
+                    toStatus: "pending",
+                    changedByEmail: placedByEmail,
+                },
+            });
+
+            // Step 9: order items — one query
+            await tx.orderItems.createMany({
+                data: itemsToCreate.map((item) => ({
+                    orderNumber: order.number,
+                    productId: item.productId,
+                    productVariantId: item.productVariantId,
+                    menuId: item.menuId,
+                    addonId: item.type === "addons" ? item.addonId : undefined,
+                    Instructions: item.instructions,   // schema really uses capital I
+                    quantity: item.quantity,
+                    price: item.price,
+                    type: item.type,
+                    status: item.status,
+                    estimatedReadyAt: item.estimatedReadyAt,
+                })),
+            });
+
+            // Step 10: type-specific row
             if (data.orderType === "delivery") {
-                if (!estimatedDeliveryTime) {
-                    throw new Error("Estimated delivery time missing");
-                }
-                
-                const deliveryId = await CreateIdentifier("DEL");
+                if (!estimatedDeliveryTime) throw new HttpError(500, "Estimated delivery time missing");
 
-                if(!deliveryId) {
-                    res.status(400).json("Unable to create a delivery Identifier")
-                    return
-                }
+                const deliveryId = await CreateIdentifier("DEL");
+                if (!deliveryId) throw new HttpError(500, "Unable to create delivery identifier");
 
                 await tx.deliveries.create({
                     data: {
@@ -254,23 +258,18 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                         orderNumber: order.number,
                         shippingAddressName: data.shippingAddressName,
                         status: "pending",
-                        estimatedDeliveryTime: estimatedDeliveryTime,
+                        estimatedDeliveryTime,
                     },
                 });
             }
 
             if (data.orderType === "pickup") {
-
-                const pickupId = await CreateIdentifier("PICKUP")
-                
-                if(!pickupId) {
-                    res.status(500).json({message: "Unable to create a pickup Identifier"})
-                    return
-                }
+                const pickupId = await CreateIdentifier("PICKUP");
+                if (!pickupId) throw new HttpError(500, "Unable to create pickup identifier");
 
                 await tx.pickupOrders.create({
                     data: {
-                        id : pickupId,
+                        id: pickupId,
                         orderNumber: order.number,
                         pickupTime: data.pickupTime,
                     },
@@ -278,60 +277,64 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             }
 
             if (data.orderType === "dineIn") {
-               
-                const dineId = await CreateIdentifier("DINE")
+                const dineId = await CreateIdentifier("DINE");
+                if (!dineId) throw new HttpError(500, "Unable to create dine-in identifier");
 
-                if(!dineId) {
-                    res.status(500).json({message: "Unable to create a dine In Identifier"})
-                    return
-                }
-
-               await tx.dineInOrders.create({
+                await tx.dineInOrders.create({
                     data: {
-                    id : dineId,
-                    orderNumber: order.number,
-                    tableId: data.tableId,
-           },
-         });
-}
-             // Reward: 10% of the order total in Yousra coins
-            // customerPhone is only set for CUSTOMER and STAFF orders
-       if (customerPhone) {
-                 const customer =  await tx.customers.findUnique({
-                    where : {phone : customerPhone},
-                    include : {accounts : true}
-                 })
-
-                 if (!customer) {
-                    res.status(400).json({message: " Wrong or invalid phone number"})
-                    return
-                 }
-
-                 const account = customer.accounts
-
-                if (account) {
-                     const coins = convertToYousraCoins(0.1 * total);
-
-               // a very small order can round down to 0 coins
-                if (coins > 0) {
-                     await creditAccount(customer.customerId, coins, tx);
+                        id: dineId,
+                        orderNumber: order.number,
+                        tableId: data.tableId,
+                    },
+                });
             }
-              }
-         }
 
-             return order;
-           
+            // Step 10b: Yousra Points reward — 10% of total
+            // Customers (CUSTOMER + STAFF-on-behalf) earn points; EMPLOYEE orders don't.
+            if (customerId) {
+                const customer = await tx.customers.findUnique({
+                    where: { customerId },
+                    include: { accounts: true },
+                });
+                if (!customer) throw new HttpError(400, "Customer not found for reward");
+
+                if (customer.accounts) {
+                    const coins = convertToYousraCoins(0.1 * total);
+
+                    if (coins > 0) {
+                        // 1. credit balance
+                        await creditAccount(customer.customerId, coins, tx);
+
+                        // 2. log the movement — system credit (earn)
+                        //    fromCustomerId = null, toCustomerId = this customer, orderNumber = this order
+                        await tx.pointsTransaction.create({
+                            data: {
+                                amount: coins,
+                                fromCustomerId: null,
+                                toCustomerId: customer.customerId,
+                                orderNumber: order.number,
+                                note: "Order reward (10%)",
+                            },
+                        });
+                    }
+                }
+            }
+
+            return order;
         },
-       {
+        {
             maxWait: 10000,
             timeout: 20000,
-        }
-    );
+        });
 
-        // Step 11: send the result
+        // Step 11: respond
         res.status(201).json(newOrder);
 
     } catch (error) {
+        if (error instanceof HttpError) {
+            res.status(error.status).json({ message: error.message });
+            return;
+        }
         console.error("Error placing order:", error);
         res.status(500).json({ error: "Failed to place order" });
     }
@@ -480,9 +483,14 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
                 const discount = 0;
                 const total = subtotal - discount + deliveryFee;
 
+                const number = await CreateIdentifier("ORD");
+                if (!number) throw new HttpError(500, "Could not create order identifier");
+
+
                 // Step 6: create the order ONCE
                 const order = await tx.orders.create({
                     data: {
+                        number: number,
                         branchId: branchId,
                         guestName: data.guestName,
                         guestPhone: data.guestPhone,

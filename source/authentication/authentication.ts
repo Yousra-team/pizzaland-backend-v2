@@ -37,7 +37,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
 
         const newCustomer = await prisma.customers.create({
             data: {
-                Id: id,
+                customerId: id,
                 ...customer
             },
         });

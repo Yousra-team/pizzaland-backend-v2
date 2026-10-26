@@ -133,41 +133,39 @@ export const notifyPayment = async (req: Request, res: Response): Promise<void> 
       where: { id: data.payment_ref },
     });
 
-    if (!payment) {
-      console.warn("No payment found for ref:", data.payment_ref);
-      res.status(200).send("Unknown payment reference");
-      return;
-    }
-
     // 3. Idempotency — don't re-process a finalized payment
-    if (payment.status !== "pending") {
-      console.log("Payment already finalized:", data.payment_ref);
+      // Idempotency: only act on rows that are still pending.
+    // If the row is gone, it was already finalized (either paid or deleted on failure).
+    if (!payment || payment.status !== "pending") {
+      console.log("Payment already finalized or discarded:", data.payment_ref);
       res.status(200).send("Already processed");
       return;
     }
 
-    // 4. Map Monetbil status to our internal status
-    let newStatus: "paid" | "failed" | "cancelled";
+    // Branch on Monetbil status
     if (data.status === "success") {
-      newStatus = "paid";
-    } else if (data.status === "failed") {
-      newStatus = "failed";
-    } else if (data.status === "cancelled") {
-      newStatus = "cancelled";
-    } else {
-      console.warn("Unknown Monetbil status:", data.status);
-      res.status(200).send("Unknown status");
+      await prisma.payments.update({
+        where: { id: data.payment_ref },
+        data: { status: "paid" },
+      });
+      console.log(`Payment ${data.payment_ref} → paid`);
+      res.status(200).send("OK");
       return;
     }
 
-    // 5. Update the payment row
-    await prisma.payments.update({
-      where: { id: data.payment_ref },
-      data: { status: newStatus },
-    });
+    if (data.status === "failed" || data.status === "cancelled") {
+      await prisma.payments.delete({
+        where: { id: data.payment_ref },
+      });
+      console.log(`Payment ${data.payment_ref} discarded (${data.status})`);
+      res.status(200).send("OK");
+      return;
+    }
 
-    console.log(`Payment ${data.payment_ref} → ${newStatus}`);
-    res.status(200).send("OK");
+    // Unknown status — leave the row alone so a later correct webhook can finalize it
+    console.warn("Unknown Monetbil status:", data.status);
+    res.status(200).send("Unknown status");
+    return;
 
   } catch (error) {
     console.error("Monetbil webhook error:", error);
@@ -226,8 +224,18 @@ export const CreatePayment = async (req: Request , res: Response): Promise<void>
       }
 
       const data = result.data;
+      
+      const Id = await CreateIdentifier("PAYMENT")
+
+      if(!Id) {
+        res.status(500).json({message:" Could not create a payment Identifier"})
+        return
+      }
+
+
       const newPayment = await prisma.payments.create({
          data: {
+          id: Id,
           ...data,
           status: "paid"
          }

@@ -159,6 +159,8 @@ enum countTypes {
   PICKUP
   YPTS
   PAYMENT
+  ORD
+  OSH
 }
 
 enum paymentStatus {

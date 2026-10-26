@@ -1,15 +1,15 @@
 
-// source/orders/order.includes.ts
+// source/orders/order.include.ts
 export const fullOrderInclude = {
     customer: {
         select: { phone: true, firstName: true, lastName: true },
     },
     items: {
         include: {
-            product: { select: { id: true, name: true, price: true } },
+            product:        { select: { id: true, name: true, price: true } },
             productVariant: { select: { id: true, name: true, price: true } },
-            menu:    { select: { id: true, name: true, price: true } },
-            addons:   { select: { id: true, name: true, price: true } },
+            menu:           { select: { id: true, name: true, price: true } },
+            addons:         { select: { id: true, name: true, price: true } },
         },
     },
     pickupOrders: true,
@@ -18,8 +18,8 @@ export const fullOrderInclude = {
             table: {
                 include: {
                     floor: { select: { id: true, name: true } },
-                }
-            }
+                },
+            },
         },
     },
     deliveries: {
@@ -34,5 +34,14 @@ export const fullOrderInclude = {
     },
     Payments: {
         select: { id: true, amount: true, method: true, status: true },
+    },
+    // NEW — the audit trail of status transitions, oldest first
+    statusHistory: {
+        orderBy: { createdAt: "asc" as const },
+        include: {
+            changedBy: {
+                select: { email: true, firstName: true, lastName: true, role: true },
+            },
+        },
     },
 } as const;
