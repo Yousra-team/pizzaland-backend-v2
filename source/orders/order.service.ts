@@ -353,8 +353,7 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
         const data = result.data;
 
         // Step 2: everything below runs in one transaction
-        const newOrder = await prisma.$transaction(
-            async (tx) => {
+        const newOrder = await prisma.$transaction(async (tx) => {
 
                 // Step 3: loop through the items, get prices and prep times
                 let subtotal = 0;

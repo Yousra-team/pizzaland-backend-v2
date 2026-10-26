@@ -229,7 +229,7 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
     await prisma.token.create({
             data:{
                token: refreshToken,
-               customerPhone: phone,
+               customerId: customer.customerId,
                type: "refreshToken",
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             },

@@ -240,7 +240,7 @@ export const CreatePayment = async (req: Request , res: Response): Promise<void>
           status: "paid"
          }
       })
-
+       res.status(200).json(newPayment)
   } catch (error) {
      res.status(500).json({message:"An internal server error"})
      console.log(error)
