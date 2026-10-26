@@ -49,9 +49,9 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
 
     // Resolve the Monetbil operator to our internal payment method enum
    let method: z.infer<typeof methodSchema>;
-    if (data.operator === "OM") {
+    if (data.operator === "CM_ORANGEMONEY") {
       method = "ORANGE_MONEY_ONLINE";
-    } else if (data.operator === "MTN") {
+    } else if (data.operator === "CM_MTNMOBILEMONEY") {
       method = "MOMO_ONLINE";
     } else {
       res.status(400).json({ message: "Unsupported operator" });

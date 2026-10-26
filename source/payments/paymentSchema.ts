@@ -10,14 +10,16 @@ export const methods = [ "CASH",
   "YOUSRA_POINTS"
 ] as const;
 
-export const paymentStatuses = ["pending", "paid","cancelled"]
+export const paymentStatuses = ["pending", "paid","cancelled"] as const;
+
+export const operators = ["CM_ORANGEMONEY" , "CM_MTNMOBILEMONEY"] as const;
 
 export const paymentDetailsSchema = z.object({
     user : z.string(),
     phone : z.e164(),
     orderNumber : z.string(),
     amount: z.number().int().positive(),
-    operator: z.string(), // make it an enum later
+    operator: z.enum(operators), // make it an enum later
     locale: z.string(), // make it an enum later
 });
 
