@@ -10,6 +10,8 @@ export const methods = [ "CASH",
   "YOUSRA_POINTS"
 ] as const;
 
+export const paymentStatuses = ["pending", "paid","cancelled"]
+
 export const paymentDetailsSchema = z.object({
     user : z.string(),
     phone : z.e164(),
@@ -31,3 +33,10 @@ export const notifyPaymentSchema = z.object({
 });
 
 export const methodSchema = z.enum(methods)
+
+export const paymentSchema = z.object({
+   orderNumber : z.string(),
+   amount : z.number().int().positive(),
+   method: methodSchema,
+   provider: z.string(),
+});

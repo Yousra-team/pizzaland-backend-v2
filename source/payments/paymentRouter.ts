@@ -3,6 +3,7 @@ import {
   initiatePayment,
   notifyPayment,
   isMyOrderPaid,
+  CreatePayment
 } from "./payment.js";
 // import { authenticate } from "../auth/auth.middleware.js"; // adjust path to your real auth middleware
 
@@ -15,7 +16,8 @@ router.post("/notify", notifyPayment);
 
 // ─── Protected ───────────────────────────────────────────
 // Customer or cashier starts a payment attempt
-router.post("/initiate", /* authenticate, */ initiatePayment);
+router.post("/initiate/online", /* authenticate, */ initiatePayment);
+router.post("/initiate", CreatePayment);
 
 // Check whether an order has been fully paid
 router.get("/status/:orderNumber", /* authenticate, */ isMyOrderPaid);

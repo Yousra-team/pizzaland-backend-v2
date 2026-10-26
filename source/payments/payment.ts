@@ -2,7 +2,7 @@ import axios from "axios";
 import { Request, Response } from "express";
 import {prisma} from "../lib/prisma.js";
 import * as z from "zod";
-import { paymentDetailsSchema , notifyPaymentSchema, methodSchema } from "./paymentSchema.js";
+import { paymentDetailsSchema , notifyPaymentSchema, methodSchema, paymentSchema } from "./paymentSchema.js";
 import { CreateIdentifier } from "../utilities/counter.js";
 
 export const initiatePayment = async (req: Request, res: Response): Promise<void> => {
@@ -213,5 +213,28 @@ export const isMyOrderPaid = async (req: Request, res: Response): Promise<void> 
   } catch (error) {
     console.error("isMyOrderPaid error:", error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const CreatePayment = async (req: Request , res: Response): Promise<void> => {
+  try {
+      const result = paymentSchema.safeParse(req.body)
+      if(!result.success) {
+        const fieldErrors = z.flattenError(result.error)
+        res.status(400).json({message: "Bad Request" , error:fieldErrors.fieldErrors})
+        return
+      }
+
+      const data = result.data;
+      const newPayment = await prisma.payments.create({
+         data: {
+          ...data,
+          status: "paid"
+         }
+      })
+
+  } catch (error) {
+     res.status(500).json({message:"An internal server error"})
+     console.log(error)
   }
 };

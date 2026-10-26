@@ -117,6 +117,7 @@ export const registerAdmin = async (req: Request, res: Response): Promise<void> 
         if (!admin.email.endsWith("@yousracompany.com")) {
             res.status(403).json({message: "Haha That was smart but you dont work here!"});
             console.log("Better luck next time!")
+            return;
         };
 
         const existingAdmin = await prisma.employees.findUnique({

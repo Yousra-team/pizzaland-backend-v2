@@ -9,4 +9,3 @@ const prisma = new PrismaClient({ adapter });
 
 export { prisma };
 
-//postgresql://postgres.tnffcetaxdicfuowdgqz:kXDMyDUtvtuBgs3W@aws-1-eu-west-1.pooler.supabase.com:5432/postgres

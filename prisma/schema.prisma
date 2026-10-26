@@ -161,29 +161,35 @@ enum countTypes {
   PAYMENT
 }
 
+enum paymentStatus {
+  pending
+  paid
+  cancelled
+}
+
 // ─── Customer domain ──────────────────────────────────────────────────────────
 
 model Customers {
-  customerId        String              @id @map("customer_id")
-  phone             String              @unique
-  firstName         String              @map("first_name")
-  lastName          String?             @map("last_name")
-  email             String?             @unique
-  gender            Gender?
-  dateOfBirth       DateTime?           @map("date_of_birth")
-  accounts          Accounts?
-  orders            Orders[]
-  reservations      Reservations[]
-  promotions        PromotionUsage[]
-  addresses         Address[]
-  favorites         Favorites[]
-  reviews           Reviews[]
-  pointsSent        PointsTransaction[] @relation("PointsSent")
-  pointsReceived    PointsTransaction[] @relation("PointsReceived")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  tokens            Token[]
-  userPreferences   UserPreferences[]
+  customerId      String              @id @map("customer_id")
+  phone           String              @unique
+  firstName       String              @map("first_name")
+  lastName        String?             @map("last_name")
+  email           String?             @unique
+  gender          Gender?
+  dateOfBirth     DateTime?           @map("date_of_birth")
+  accounts        Accounts?
+  orders          Orders[]
+  reservations    Reservations[]
+  promotions      PromotionUsage[]
+  addresses       Address[]
+  favorites       Favorites[]
+  reviews         Reviews[]
+  pointsSent      PointsTransaction[] @relation("PointsSent")
+  pointsReceived  PointsTransaction[] @relation("PointsReceived")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  tokens          Token[]
+  userPreferences UserPreferences[]
 
   @@map("customers")
 }
@@ -282,24 +288,24 @@ model Reviews {
 // ─── Employee & branch domain ─────────────────────────────────────────────────
 
 model Employees {
-  email                String                 @id
-  firstName            String                 @map("first_name")
-  lastName             String?                @map("last_name")
-  phone                String                 @unique
-  password             String
-  role                 Role
-  branch               Branches?              @relation("BranchEmployees", fields: [branchId], references: [id])
-  branchId             String?                @map("branch_id")
-  managedBranch        Branches?              @relation("BranchManager")
-  verified             Boolean                @default(false)
-  stationSessions      StationSessions[]
-  deliveries           Deliveries[]
-  payrollOrders        Orders[]               @relation("PayrollEmployeeOrders")
-  orderStatusChanges   OrderStatusHistory[]
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
-  tokens               Token[]
-  userPreferences      UserPreferences[]
+  email              String               @id
+  firstName          String               @map("first_name")
+  lastName           String?              @map("last_name")
+  phone              String               @unique
+  password           String
+  role               Role
+  branch             Branches?            @relation("BranchEmployees", fields: [branchId], references: [id])
+  branchId           String?              @map("branch_id")
+  managedBranch      Branches?            @relation("BranchManager")
+  verified           Boolean              @default(false)
+  stationSessions    StationSessions[]
+  deliveries         Deliveries[]
+  payrollOrders      Orders[]             @relation("PayrollEmployeeOrders")
+  orderStatusChanges OrderStatusHistory[]
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  tokens             Token[]
+  userPreferences    UserPreferences[]
 
   @@index([branchId])
   @@map("employees")
@@ -520,20 +526,20 @@ model ShippingAddresses {
 // `payrollEmployeeEmail` identifies an employee who IS the customer of the order
 // (self-order paid by payroll deduction), not the staff member who placed it.
 model Orders {
-  number               String                @id @map("number")
-  branch               Branches              @relation(fields: [branchId], references: [id])
-  branchId             String                @map("branch_id")
-  customer             Customers?            @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
-  customerId           String?               @map("customer_id") // null = walk-in or employee self-order
-  payrollEmployee      Employees?            @relation(name: "PayrollEmployeeOrders", fields: [payrollEmployeeEmail], references: [email])
-  payrollEmployeeEmail String?               @map("payroll_employee_email") // employee ordering for themselves (payroll deduction)
-  guestName            String?               @map("Guest Name")
-  guestPhone           String?               @map("Guest Phone")
-  discount             Float                 @default(0)
-  subtotal             Float                 @map("subtotal")
-  status               orderstatus           @default(pending)
-  total                Float                 @map("total")
-  orderType            orderType             @map("order_type")
+  number               String               @id @map("number")
+  branch               Branches             @relation(fields: [branchId], references: [id])
+  branchId             String               @map("branch_id")
+  customer             Customers?           @relation(fields: [customerId], references: [customerId], onDelete: Restrict)
+  customerId           String?              @map("customer_id") // null = walk-in or employee self-order
+  payrollEmployee      Employees?           @relation(name: "PayrollEmployeeOrders", fields: [payrollEmployeeEmail], references: [email])
+  payrollEmployeeEmail String?              @map("payroll_employee_email") // employee ordering for themselves (payroll deduction)
+  guestName            String?              @map("Guest Name")
+  guestPhone           String?              @map("Guest Phone")
+  discount             Float                @default(0)
+  subtotal             Float                @map("subtotal")
+  status               orderstatus          @default(pending)
+  total                Float                @map("total")
+  orderType            orderType            @map("order_type")
   items                OrderItems[]
   deliveries           Deliveries[]
   pickupOrders         PickupOrders[]
@@ -543,8 +549,8 @@ model Orders {
   reviews              Reviews[]
   statusHistory        OrderStatusHistory[]
   pointsPayments       PointsTransaction[]
-  createdAt            DateTime              @default(now()) @map("created_at")
-  updatedAt            DateTime              @updatedAt @map("updated_at")
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
 
   @@index([customerId])
   @@index([payrollEmployeeEmail])
@@ -557,7 +563,7 @@ model Orders {
 // First row for a new order: fromStatus = null, toStatus = pending,
 //   changedByEmail = whoever placed it (cashier/waitress/employee).
 model OrderStatusHistory {
-  id             String       @id 
+  id             String       @id
   order          Orders       @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber    String       @map("order_number")
   fromStatus     orderstatus? @map("from_status") // null = order creation
@@ -599,7 +605,7 @@ model OrderItems {
 }
 
 model Deliveries {
-  id                    String            @id 
+  id                    String            @id
   order                 Orders            @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber           String            @map("order_number")
   driver                Employees?        @relation(fields: [driverEmail], references: [email])
@@ -622,7 +628,7 @@ model Deliveries {
 }
 
 model PickupOrders {
-  id          String   @id 
+  id          String   @id
   order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   pickupTime  DateTime @map("pickup_time")
@@ -634,7 +640,7 @@ model PickupOrders {
 }
 
 model DineInOrders {
-  id          String   @id 
+  id          String   @id
   order       Orders   @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   orderNumber String   @map("order_number")
   table       Table?   @relation(fields: [tableId], references: [id])
@@ -649,14 +655,14 @@ model DineInOrders {
 // ─── Payment domain ───────────────────────────────────────────────────────────
 
 model Payments {
-  id          String         @id 
+  id          String         @id
   order       Orders         @relation(fields: [orderNumber], references: [number], onDelete: Cascade)
   // Removed @unique: an order may have multiple payment attempts
   orderNumber String         @map("order_number")
   amount      Float
   method      paymentMethods
   provider    String
-  status      String
+  status      paymentStatus
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
