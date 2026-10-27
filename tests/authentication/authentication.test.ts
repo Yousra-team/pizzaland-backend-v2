@@ -77,16 +77,20 @@ describe("registerCustomer", () => {
         expect(prismaMock.customers.create).not.toHaveBeenCalled();
     });
 
-    it("creates the customer with a counter id and opens an account with 20 coins", async () => {
+    // customerId is the primary key of Customers (schema.prisma); there is no `Id` column
+    it("creates the customer with the counter id as customerId and opens an account with 20 coins", async () => {
         prismaMock.customers.findUnique.mockResolvedValue(null);
         vi.mocked(CreateIdentifier).mockResolvedValue("CUST-PZ20261024-0001");
-        prismaMock.customers.create.mockResolvedValue({ customerId: "cust_1", ...body });
+        prismaMock.customers.create.mockImplementation(({ data }: any) => Promise.resolve(data));
         const res = mockRes();
 
         await registerCustomer(mockReq({ body }), res);
 
-        expect(prismaMock.customers.create.mock.calls[0][0].data).toMatchObject({ Id: "CUST-PZ20261024-0001", ...body });
-        expect(prismaMock.accounts.create).toHaveBeenCalledWith({ data: { customerId: "cust_1", balance: 20 } });
+        const saved = prismaMock.customers.create.mock.calls[0][0].data;
+        expect(saved).toMatchObject({ customerId: "CUST-PZ20261024-0001", ...body });
+        expect(saved).not.toHaveProperty("Id");
+        // the account belongs to the customer that was just created, not to some other id
+        expect(prismaMock.accounts.create).toHaveBeenCalledWith({ data: { customerId: "CUST-PZ20261024-0001", balance: 20 } });
         expect(res.status).toHaveBeenCalledWith(201);
     });
 
@@ -163,8 +167,8 @@ describe("registerAdmin", () => {
         expect(res.status).toHaveBeenCalledWith(201);
     });
 
-    // SECURITY: the 403 is sent but the code goes on and creates the admin anyway
-    it("BUG #1: refuses emails outside @yousracompany.com and creates nothing", async () => {
+    // SECURITY, regression: was BUG #1 (the 403 was sent, then the admin was created anyway)
+    it("refuses emails outside @yousracompany.com and creates nothing", async () => {
         prismaMock.employees.findUnique.mockResolvedValue(null);
         const res = mockRes();
 
@@ -247,8 +251,8 @@ describe("verifyCustomer", () => {
         expect(res.status).toHaveBeenCalledWith(200);
     });
 
-    // The Token model links to customers through customerId; customerPhone no longer exists
-    it("BUG #2: saves the refresh token with the customerId", async () => {
+    // regression: was BUG #2. The Token model links to customers through customerId
+    it("saves the refresh token with the customerId", async () => {
         vi.mocked(createVerificationCheck).mockResolvedValue({ status: "approved" } as any);
         prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_1", phone: body.phone });
 

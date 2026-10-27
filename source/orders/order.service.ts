@@ -1,4 +1,3 @@
-
 import { prisma } from "../lib/prisma.js";
 import { Request, Response } from "express";
 import { createOrderSchema , orderStatusQuerySchema , statusEnum , orderItemSchema, updateOrderSchema , deleteOrderSchema , markItemStatusSchema} from "./order.schema.js";
@@ -6,12 +5,97 @@ import { fullOrderInclude } from "./order.include.js";
 import * as z from "zod";
 import { creditAccount , convertToYousraCoins } from "../crm/account.js";
 import { CreateIdentifier } from "../utilities/counter.js";
+import { sendOrderReceiptFR } from "../notifications/index.js";
+import { DateTime } from "luxon";
 
 
 // Helper Functions
 class HttpError extends Error {
-    constructor(public status: number, message: string) {
+    // code is an optional short machine-readable tag (e.g. "INVALID_VARIANT")
+    constructor(public status: number, message: string, public code?: string) {
         super(message);
+    }
+}
+
+// Write one row in the order's status-change audit log.
+// id has no default in the schema, so we always generate one.
+async function recordStatusChange(
+    tx: any,
+    orderNumber: string,
+    fromStatus: string | null,
+    toStatus: string,
+    changedByEmail: string | null,
+) {
+    const historyId = await CreateIdentifier("OSH");
+    if (!historyId) throw new HttpError(500, "Could not create history identifier");
+
+    await tx.orderStatusHistory.create({
+        data: {
+            id: historyId,
+            orderNumber,
+            fromStatus,
+            toStatus,
+            changedByEmail,
+        },
+    });
+}
+
+// Send the French WhatsApp receipt for an order. Runs AFTER the order is saved and
+// is fire-and-forget: a notification problem must never fail or delay the order.
+async function sendOrderReceipt(orderNumber: string) {
+    try {
+        const order = await prisma.orders.findUnique({
+            where: { number: orderNumber },
+            include: {
+                customer: { select: { phone: true, firstName: true } },
+                items: {
+                    include: {
+                        product: { select: { name: true } },
+                        productVariant: { select: { name: true } },
+                        menu: { select: { name: true } },
+                        addons: { select: { name: true } },
+                    },
+                },
+                deliveries: { select: { shippingAddressName: true } },
+            },
+        });
+        if (!order) return;
+
+        // Who to send to: the registered customer, otherwise the guest. No phone → nothing to send.
+        const to = order.customer?.phone ?? order.guestPhone;
+        if (!to) return;
+
+        const customerName = order.customer?.firstName ?? order.guestName ?? "Client";
+
+        // Build the item list. WhatsApp template values cannot contain newlines, so we join with " | ".
+        const lines: string[] = [];
+        for (const item of order.items) {
+            const name = item.product?.name ?? item.menu?.name ?? item.addons?.name ?? "Article";
+            const variant = item.productVariant?.name ? ` (${item.productVariant.name})` : "";
+            lines.push(`${item.quantity}x ${name}${variant}`);
+        }
+        const itemsList = lines.join(" | ");
+
+        const deliveryFee = order.total - order.subtotal + order.discount;
+        const address =
+            order.deliveries[0]?.shippingAddressName ??
+            (order.orderType === "pickup" ? "À emporter" : "Sur place");
+
+        await sendOrderReceiptFR({
+            to,
+            customerName,
+            orderNumber: order.number,
+            date: DateTime.fromJSDate(order.createdAt).setZone("Africa/Douala").toFormat("dd/MM/yyyy HH:mm"),
+            itemsList,
+            subtotal: String(order.subtotal),
+            discount: order.discount,
+            deliveryFee: String(deliveryFee),
+            total: String(order.total),
+            address,
+            paymentMethod: "En attente",
+        });
+    } catch (error) {
+        console.error("Order receipt (WhatsApp) failed for", orderNumber, error);
     }
 }
 
@@ -80,9 +164,15 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                             select: { price: true, productId: true },
                         });
                         if (!variant || variant.productId !== item.productId) {
-                            throw new HttpError(400, "Variant does not belong to this product");
+                            throw new HttpError(400, "Variant does not belong to this product", "INVALID_VARIANT");
                         }
                         price = variant.price;
+                    } else {
+                        // No variant chosen: if this product HAS variants, one must be picked.
+                        const variantCount = await tx.productVariants.count({ where: { productId: item.productId! } });
+                        if (variantCount > 0) {
+                            throw new HttpError(400, "This product requires a variant", "INVALID_VARIANT");
+                        }
                     }
                 }
 
@@ -214,37 +304,26 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             });
 
             // Step 8b: first OrderStatusHistory row — fromStatus=null, toStatus=pending
-            // id has no default in schema, so we generate one
-            const historyId = await CreateIdentifier("OSH");
-            if (!historyId) throw new HttpError(500, "Could not create history identifier");
+            await recordStatusChange(tx, order.number, null, "pending", placedByEmail);
 
-            await tx.orderStatusHistory.create({
-                data: {
-                    id: historyId,
-                    orderNumber: order.number,
-                    fromStatus: null,            // null = order creation
-                    toStatus: "pending",
-                    changedByEmail: placedByEmail,
-                },
-            });
-
-            // Step 9: order items — one query
-            await tx.orderItems.createMany({
-                data: itemsToCreate.map((item) => ({
-                    orderNumber: order.number,
-                    productId: item.productId,
-                    productVariantId: item.productVariantId,
-                    menuId: item.menuId,
-                    addonId: item.type === "addons" ? item.addonId : undefined,
-                    Instructions: item.instructions,   // schema really uses capital I
-                    quantity: item.quantity,
-                    price: item.price,
-                    type: item.type,
-                    status: item.status,
-                    estimatedReadyAt: item.estimatedReadyAt,
-                })),
-            });
-
+        // Step 9: order items (one row per item)
+            for (const item of itemsToCreate) {
+                await tx.orderItems.create({
+                    data: {
+                        orderNumber: order.number,
+                        productId: item.productId,
+                        productVariantId: item.productVariantId,
+                        menuId: item.menuId,
+                        addonId: item.type === "addons" ? item.addonId : undefined,
+                        Instructions: item.instructions,   // schema really uses capital I
+                        quantity: item.quantity,
+                        price: item.price,
+                        type: item.type,
+                        status: item.status,
+                        estimatedReadyAt: item.estimatedReadyAt,
+                    },
+                });
+            }
             // Step 10: type-specific row
             if (data.orderType === "delivery") {
                 if (!estimatedDeliveryTime) throw new HttpError(500, "Estimated delivery time missing");
@@ -306,7 +385,6 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
                         await creditAccount(customer.customerId, coins, tx);
 
                         // 2. log the movement — system credit (earn)
-                        //    fromCustomerId = null, toCustomerId = this customer, orderNumber = this order
                         await tx.pointsTransaction.create({
                             data: {
                                 amount: coins,
@@ -327,12 +405,13 @@ export const placeOrder = async (req: Request, res: Response): Promise<void> => 
             timeout: 20000,
         });
 
-        // Step 11: respond
+        // Step 11: respond, then send the receipt (never blocks the response)
         res.status(201).json(newOrder);
+        void sendOrderReceipt(newOrder.number);
 
     } catch (error) {
         if (error instanceof HttpError) {
-            res.status(error.status).json({ message: error.message });
+            res.status(error.status).json({ message: error.message, code: error.code });
             return;
         }
         console.error("Error placing order:", error);
@@ -355,248 +434,232 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
         // Step 2: everything below runs in one transaction
         const newOrder = await prisma.$transaction(async (tx) => {
 
-                // Step 3: loop through the items, get prices and prep times
-                let subtotal = 0;
-                let longestPrepTime = 0;
-                const itemsToCreate = [];
+            // Step 3: loop through the items, get prices and prep times
+            let subtotal = 0;
+            let longestPrepTime = 0;
+            const itemsToCreate: Array<{
+                productId?: string;
+                productVariantId?: string;
+                addonId?: string;
+                menuId?: string;
+                instructions?: string;
+                quantity: number;
+                price: number;
+                type: "product" | "menu" | "addons";
+                status: "pending";
+                estimatedReadyAt: Date;
+            }> = [];
 
-                for (const item of data.items) {
-                    let price: number | undefined;
-                    let prepTime = 0;
+            for (const item of data.items) {
+                let price: number | undefined;
+                let prepTime = 0;
 
-                    if (item.type === "product") {
-                        const product = await tx.products.findUnique({
-                            where: { id: item.productId! },
-                            select: { price: true, preparationTime: true },
+                if (item.type === "product") {
+                    const product = await tx.products.findUnique({
+                        where: { id: item.productId! },
+                        select: { price: true, preparationTime: true },
+                    });
+                    if (!product) throw new HttpError(404, "Product not found");
+
+                    price = product.price;
+                    prepTime = product.preparationTime ?? 0;
+
+                    if (item.productVariantId) {
+                        const variant = await tx.productVariants.findUnique({
+                            where: { id: item.productVariantId },
+                            select: { price: true, productId: true },
                         });
-                        if (!product) {
-                            throw new Error("Product not found");
+                        if (!variant || variant.productId !== item.productId) {
+                            throw new HttpError(400, "Variant does not belong to this product", "INVALID_VARIANT");
                         }
-                        price = product.price;
-                        prepTime = product.preparationTime ?? 0;
-
-                        if (item.productVariantId) {
-                            const variant = await tx.productVariants.findUnique({
-                                where: { id: item.productVariantId },
-                                select: { price: true, productId: true },
-                            });
-                            if (!variant || variant.productId !== item.productId) {
-                                throw new Error("Variant does not belong to this product");
-                            }
-                            price = variant.price;
+                        price = variant.price;
+                    } else {
+                        const variantCount = await tx.productVariants.count({ where: { productId: item.productId! } });
+                        if (variantCount > 0) {
+                            throw new HttpError(400, "This product requires a variant", "INVALID_VARIANT");
                         }
                     }
+                }
 
-                    if (item.type === "menu") {
-                        const menu = await tx.menu.findUnique({
-                            where: { id: item.menuId! },
-                            select: { price: true, preparationTime: true },
-                        });
-                        if (!menu) {
-                            throw new Error("Menu not found");
-                        }
-                        price = menu.price;
-                        prepTime = menu.preparationTime ?? 0;
-                    }
+                if (item.type === "menu") {
+                    const menu = await tx.menu.findUnique({
+                        where: { id: item.menuId! },
+                        select: { price: true, preparationTime: true },
+                    });
+                    if (!menu) throw new HttpError(404, "Menu not found");
 
-                    if (item.type === "addons") {
-                        const addon = await tx.addons.findUnique({
-                            where: { id: item.addonId! },
-                            select: { price: true },
-                        });
-                        if (!addon) {
-                            throw new Error("Addon not found");
-                        }
-                        price = addon.price;
-                    }
+                    price = menu.price;
+                    prepTime = menu.preparationTime ?? 0;
+                }
 
-                    if (price === undefined) {
-                        throw new Error(`Price not found for item type ${item.type}`);
-                    }
+                if (item.type === "addons") {
+                    const addon = await tx.addons.findUnique({
+                        where: { id: item.addonId! },
+                        select: { price: true },
+                    });
+                    if (!addon) throw new HttpError(404, "Addon not found");
 
-                    subtotal += price * item.quantity;
+                    price = addon.price;
+                }
 
-                    if (prepTime > longestPrepTime) {
-                        longestPrepTime = prepTime;
-                    }
+                if (price === undefined) {
+                    throw new HttpError(400, `Price not found for item type ${item.type}`);
+                }
 
-                    itemsToCreate.push({
+                subtotal += price * item.quantity;
+                if (prepTime > longestPrepTime) longestPrepTime = prepTime;
+
+                itemsToCreate.push({
+                    productId: item.productId,
+                    productVariantId: item.productVariantId,
+                    addonId: item.addonId,
+                    menuId: item.menuId,
+                    instructions: item.instructions,
+                    quantity: item.quantity,
+                    price,
+                    type: item.type,
+                    status: "pending" as const,
+                    estimatedReadyAt: new Date(Date.now() + prepTime * 60 * 1000),
+                });
+            }
+
+            subtotal = Math.round(subtotal);
+
+            // Step 4: find the branch, delivery fee and estimated delivery time
+            let deliveryFee = 0;
+            let estimatedDeliveryTime: Date | null = null;
+            let branchId: string;
+
+            if (data.orderType === "delivery") {
+                const shippingAddress = await tx.shippingAddresses.findUnique({
+                    where: { name: data.shippingAddressName },
+                    select: { deliveryFee: true, deliveryTime: true, branchId: true },
+                });
+                if (!shippingAddress) throw new HttpError(404, "Shipping address not found");
+
+                deliveryFee = shippingAddress.deliveryFee;
+                branchId = shippingAddress.branchId;
+
+                const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
+                estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
+
+            } else if (data.orderType === "dineIn") {
+                const table = await tx.table.findUnique({
+                    where: { id: data.tableId },
+                    select: { floorId: true, floor: { select: { branchId: true } } },
+                });
+                if (!table) throw new HttpError(404, "Table not found");
+                branchId = table.floor.branchId;
+
+            } else {
+                // pickup
+                if (!data.branchId) throw new HttpError(400, "branchId is required for pickup orders");
+                branchId = data.branchId;
+            }
+
+            // Step 5: totals (promotions will come later)
+            const discount = 0;
+            const total = subtotal - discount + deliveryFee;
+
+            const number = await CreateIdentifier("ORD");
+            if (!number) throw new HttpError(500, "Could not create order identifier");
+
+            // Step 6: create the order ONCE
+            const order = await tx.orders.create({
+                data: {
+                    number,
+                    branchId,
+                    guestName: data.guestName,
+                    guestPhone: data.guestPhone,
+                    discount,
+                    subtotal,
+                    total,
+                    status: "pending",
+                    orderType: data.orderType,
+                },
+            });
+
+            // Step 6b: first OrderStatusHistory row — a guest order has no employee behind it
+            await recordStatusChange(tx, order.number, null, "pending", null);
+            // Step 7: create the order items (one row per item)
+            for (const item of itemsToCreate) {
+                await tx.orderItems.create({
+                    data: {
+                        orderNumber: order.number,
                         productId: item.productId,
                         productVariantId: item.productVariantId,
-                        instructions: item.instructions,
-                        addonId: item.type === "addons" ? item.addonId : undefined,  // ← fixed
                         menuId: item.menuId,
+                        addonId: item.type === "addons" ? item.addonId : undefined,
+                        Instructions: item.instructions,
                         quantity: item.quantity,
-                        price: price,
+                        price: item.price,
                         type: item.type,
-                        status: "pending" as const,
-                        estimatedReadyAt: new Date(Date.now() + prepTime * 60 * 1000),
-                    });
-                }
-
-                subtotal = Math.round(subtotal);
-
-                // Step 4: find the branch, delivery fee and estimated delivery time
-                let deliveryFee = 0;
-                let estimatedDeliveryTime: Date | null = null;
-                let branchId: string ;
-
-                if (data.orderType === "delivery") {
-                    const shippingAddress = await tx.shippingAddresses.findUnique({
-                        where: { name: data.shippingAddressName },
-                        select: { deliveryFee: true, deliveryTime: true, branchId: true },
-                    });
-
-                    if (!shippingAddress) {
-                        throw new Error("Shipping address not found");
-                    }
-
-                    deliveryFee = shippingAddress.deliveryFee;
-                    branchId = shippingAddress.branchId;
-
-                    const totalMinutes = longestPrepTime + shippingAddress.deliveryTime;
-                    estimatedDeliveryTime = new Date(Date.now() + totalMinutes * 60 * 1000);
-                } else if (data.orderType === "dineIn") {
-                    const table = await tx.table.findUnique({
-                    where: { id: data.tableId },
-                    select: { floorId: true , floor: { select: { branchId: true } } },
-                });
-
-                    if (!table) {
-                    throw new Error("Table not found");
-                    }
-
-                    branchId = table.floor.branchId;
-                } 
-                
-                else{
-                    // pickup and dineIn both send a branchId
-                    if(!data.branchId) {
-                        res.status(400).json({ message: "branchId is required for pickup and dineIn orders" });
-                        return;
-                    }
-                    branchId = data.branchId;
-                }
-
-                // Step 5: totals (promotions will come later)
-                const discount = 0;
-                const total = subtotal - discount + deliveryFee;
-
-                const number = await CreateIdentifier("ORD");
-                if (!number) throw new HttpError(500, "Could not create order identifier");
-
-
-                // Step 6: create the order ONCE
-                const order = await tx.orders.create({
-                    data: {
-                        number: number,
-                        branchId: branchId,
-                        guestName: data.guestName,
-                        guestPhone: data.guestPhone,
-                        discount: discount,
-                        subtotal: subtotal,
-                        total: total,
-                        status: "pending",
-                        orderType: data.orderType,
+                        status: item.status,
+                        estimatedReadyAt: item.estimatedReadyAt,
                     },
                 });
-
-                // Step 7: create the order items
-                for (const item of itemsToCreate) {
-                    await tx.orderItems.create({
-                        data: {
-                            orderNumber: order.number,
-                            productId: item.productId,
-                            addonId: item.addonId,
-                            productVariantId: item.productVariantId,
-                            Instructions: item.instructions,
-                            menuId: item.menuId,
-                            quantity: item.quantity,
-                            price: item.price,
-                            type: item.type,
-                            status: item.status,
-                            estimatedReadyAt: item.estimatedReadyAt,
-                        },
-                    });
-                }
-
-                // Step 8: create the extra row depending on the order type
-                if (data.orderType === "delivery") {
-                    if (!estimatedDeliveryTime) {
-                        throw new Error("Estimated delivery time missing");
-                    }
-                    const deliveryId = await CreateIdentifier("DEL");
-
-                      if(!deliveryId) {
-                          res.status(400).json("Unable to create a delivery Identifier")
-                          return
-                       }
-
-                    await tx.deliveries.create({
-                        data: {
-                            id: deliveryId,
-                            orderNumber: order.number,
-                            shippingAddressName: data.shippingAddressName,
-                            status: "pending",
-                            estimatedDeliveryTime: estimatedDeliveryTime,
-                        },
-                    });
-                }
-
-                if (data.orderType === "pickup") {
-
-                 const pickupId = await CreateIdentifier("PICKUP")
-                
-                  if(!pickupId) {
-                     res.status(500).json({message: "Unable to create a pickup Identifier"})
-                     return
-                  }
-                    await tx.pickupOrders.create({
-                        data: {
-                            id: pickupId,
-                            orderNumber: order.number,
-                            pickupTime: data.pickupTime,
-                        },
-                    });
-                }
-
-                if (data.orderType === "dineIn") {
-                    const table = await tx.table.findUnique({
-                        where: { id: data.tableId },
-                    });
-
-                    if (!table) {
-                        throw new Error("Table not found");
-                    }
-
-                const dineId = await CreateIdentifier("DINE")
-
-                if(!dineId) {
-                    res.status(500).json({message: "Unable to create a dine In Identifier"})
-                    return
-                }
-
-                    await tx.dineInOrders.create({
-                        data: {
-                            id: dineId,
-                            orderNumber: order.number,
-                            tableId: data.tableId,
-                        },
-                    });
-                }
-
-                return order;
-            },
-            {
-                maxWait: 10000,
-                timeout: 20000,
             }
-        );
 
-        // Step 9: send the result
+            // Step 8: create the extra row depending on the order type
+            if (data.orderType === "delivery") {
+                if (!estimatedDeliveryTime) throw new HttpError(500, "Estimated delivery time missing");
+
+                const deliveryId = await CreateIdentifier("DEL");
+                if (!deliveryId) throw new HttpError(500, "Unable to create delivery identifier");
+
+                await tx.deliveries.create({
+                    data: {
+                        id: deliveryId,
+                        orderNumber: order.number,
+                        shippingAddressName: data.shippingAddressName,
+                        status: "pending",
+                        estimatedDeliveryTime,
+                    },
+                });
+            }
+
+            if (data.orderType === "pickup") {
+                const pickupId = await CreateIdentifier("PICKUP");
+                if (!pickupId) throw new HttpError(500, "Unable to create pickup identifier");
+
+                await tx.pickupOrders.create({
+                    data: {
+                        id: pickupId,
+                        orderNumber: order.number,
+                        pickupTime: data.pickupTime,
+                    },
+                });
+            }
+
+            if (data.orderType === "dineIn") {
+                const dineId = await CreateIdentifier("DINE");
+                if (!dineId) throw new HttpError(500, "Unable to create dine-in identifier");
+
+                await tx.dineInOrders.create({
+                    data: {
+                        id: dineId,
+                        orderNumber: order.number,
+                        tableId: data.tableId,
+                    },
+                });
+            }
+
+            return order;
+        },
+        {
+            maxWait: 10000,
+            timeout: 20000,
+        });
+
+        // Step 9: respond, then send the receipt (never blocks the response)
         res.status(201).json(newOrder);
+        void sendOrderReceipt(newOrder.number);
 
     } catch (error) {
+        if (error instanceof HttpError) {
+            res.status(error.status).json({ message: error.message, code: error.code });
+            return;
+        }
         console.error("Error placing guest order:", error);
         res.status(500).json({ error: "Failed to place order" });
     }
@@ -606,7 +669,7 @@ export const GuestplaceOrder = async (req: Request, res: Response): Promise<void
 
 // GET ALL ORDERS FROM YOUR BRANCH ACCORDING TO A STATUS OR ALL ORDERS FROM YOUR BRANCH
 export const getOrdersByBranch = async (req: Request, res: Response): Promise<void> => {
-    
+
     if(!req.user || req.user.role === "CUSTOMER") {
         res.status(401).json({message:"Only An employee from Pizzaland Can Access this Endpoint"})
         return;
@@ -634,7 +697,6 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
             return;
         }
 
-        
         if (!employee.branchId) {
             res.status(400).json({
                 error: { message: "Employee is not assigned to a branch"},
@@ -668,9 +730,10 @@ export const getOrdersByBranch = async (req: Request, res: Response): Promise<vo
 const FINAL_STATUSES = ["successful", "delivered", "cancelled"] as const;
 
 export const getMyOrders = async (req: Request, res: Response): Promise<void> => {
-    const phone = req.user.Id;
+    // For a customer, req.user.Id is their customerId
+    const customerId = req.user.Id;
 
-    if (!phone) {
+    if (!customerId) {
         res.status(401).json({ error: { message: "Please login", code: "UNAUTHORIZED" } });
         return;
     }
@@ -681,7 +744,7 @@ export const getMyOrders = async (req: Request, res: Response): Promise<void> =>
     try {
         const orders = await prisma.orders.findMany({
             where: {
-                customerPhone: phone,
+                customerId,
                 status: view === "history"
                     ? { in: [...FINAL_STATUSES] }
                     : { notIn: [...FINAL_STATUSES] },
@@ -735,7 +798,7 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
         // Step 5: find the order
         const existing = await prisma.orders.findUnique({
             where: { number: number },
-            select: { orderType: true, subtotal: true, discount: true, total: true },
+            select: { orderType: true, subtotal: true, discount: true, total: true, status: true },
         });
 
         if (!existing) {
@@ -746,7 +809,6 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
         // Step 6: the fields the client sent
         const status = data.status;
         const discount = data.discount;
-        const employeeEmail = data.employeeEmail;
         const pickupTime = data.pickupTime;
         const tableId = data.tableId;
         const driverEmail = data.driverEmail;
@@ -776,17 +838,7 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
             return;
         }
 
-        // Step 8: check that the employee, driver and table exist
-        if (employeeEmail !== undefined) {
-            const employee = await prisma.employees.findUnique({
-                where: { email: employeeEmail },
-            });
-            if (!employee) {
-                res.status(404).json({ error: "Employee not found" });
-                return;
-            }
-        }
-
+        // Step 8: check that the driver and table exist
         if (driverEmail !== undefined) {
             const driver = await prisma.employees.findUnique({
                 where: { email: driverEmail },
@@ -829,17 +881,21 @@ export const updateOrder = async (req: Request, res: Response): Promise<void> =>
         const order = await prisma.$transaction(
             async (tx) => {
 
-                // Update the main order
-                if (status !== undefined || discount !== undefined || employeeEmail !== undefined) {
+                // Update the main order (status / discount)
+                if (status !== undefined || discount !== undefined) {
                     await tx.orders.update({
                         where: { number: number },
                         data: {
                             status: status,
                             discount: discount,
                             total: newTotal,
-                            employeeEmail: employeeEmail,
                         },
                     });
+                }
+
+                // A status change is recorded in the audit log
+                if (status !== undefined) {
+                    await recordStatusChange(tx, number, existing.status, status, req.user.Id);
                 }
 
                 // Update the pickup row
@@ -896,7 +952,7 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
     try{
          const result = orderStatusQuerySchema.safeParse(req.query);
 
-         if(!result.data) {
+         if(!result.success) {
             const fieldErrors = z.flattenError(result.error)
             res.status(400).json({message: " Wrong Input Values" , error: fieldErrors.fieldErrors})
             return;
@@ -904,17 +960,35 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
 
          const { status } = result.data;
 
+         // status is optional in the schema, so a missing ?status is rejected here
+         if (!status) {
+            res.status(400).json({ error: "A status query parameter is required" });
+            return;
+         }
+
          const number = req.params.number;
 
-            if (typeof number !== "string") {
-                res.status(400).json({ error: "Invalid order number" });
-                return;
-            }
+         if (typeof number !== "string") {
+            res.status(400).json({ error: "Invalid order number" });
+            return;
+         }
 
-        const updatedOrder = await prisma.orders.update({
-            where: { number },
-            data: { status },
-            include: fullOrderInclude,
+        const updatedOrder = await prisma.$transaction(async (tx) => {
+            // Read the current status first so the audit log keeps the "from -> to" move
+            const current = await tx.orders.findUnique({
+                where: { number },
+                select: { status: true },
+            });
+
+            const result = await tx.orders.update({
+                where: { number },
+                data: { status },
+                include: fullOrderInclude,
+            });
+
+            await recordStatusChange(tx, number, current?.status ?? null, status, req.user?.Id ?? null);
+
+            return result;
         });
 
         res.status(200).json({ data: updatedOrder });
@@ -984,12 +1058,13 @@ export const dispatchOrder = async (req: Request, res: Response) => {
             return;
         }
 
+        // Only a pending order can be dispatched; anything else is a conflict
         if (order.status !== "pending") {
-            res.status(400).json({ error: { message: "Order is already dispatched" } });
+            res.status(409).json({ error: { message: "Order is already dispatched or finished" } });
             return;
         }
 
-        // One transaction: update order + all its items
+        // One transaction: update order + all its items + the audit row
         await prisma.$transaction(async (tx) => {
             await tx.orders.update({
                 where: { number: orderNumber },
@@ -1000,6 +1075,8 @@ export const dispatchOrder = async (req: Request, res: Response) => {
                 where: { orderNumber: orderNumber },
                 data: { status: "in_station" },
             });
+
+            await recordStatusChange(tx, orderNumber, "pending", "preparing", req.user?.Id ?? null);
         });
 
         res.status(200).json({ data: { message: "Order dispatched to stations" } });
@@ -1063,7 +1140,9 @@ export const getStationOrders = async (req: Request, res: Response) => {
                     );
 
                     stationItems.push({
-                        itemId: product.id,
+                        // itemId is the OrderItems row id — this is what the frontend sends back
+                        // to PATCH /items/:itemId/status when marking it ready.
+                        itemId: item.id,
                         itemName: product.name,
                         itemVariant: item.productVariant?.name,
                         itemType: "product",
@@ -1092,7 +1171,8 @@ export const getStationOrders = async (req: Request, res: Response) => {
                     for (const menuItem of menu.items) {
                         if (menuItem.product.stationId === stationId) {
                             stationItems.push({
-                                itemId: menuItem.id,
+                                // Same here: the order item's id, so this menu can be marked ready.
+                                itemId: item.id,
                                 itemName: menuItem.product.name,
                                 itemType: "menu",
                                 menuName: menu.name,
@@ -1123,7 +1203,7 @@ export const getStationOrders = async (req: Request, res: Response) => {
 };
 
 
-// Send them back to the kitchen station 
+// Send them back to the kitchen station
 export const updateOrderItemStatus = async (req: Request, res: Response) => {
     try {
         const itemId = req.params.itemId as string;
@@ -1148,32 +1228,40 @@ export const updateOrderItemStatus = async (req: Request, res: Response) => {
             return;
         }
 
-        // Step 2: mark this item as ready
-        await prisma.orderItems.update({
-            where: { id: itemId },
-            data: { status: "ready" },
-        });
+        // Step 2: mark the item ready. If it was the last one, mark the whole order ready too.
+        const orderReady = await prisma.$transaction(async (tx) => {
+            await tx.orderItems.update({
+                where: { id: itemId },
+                data: { status: "ready" },
+            });
 
-        // Step 3: check if ALL items in this order are now ready
-        const remainingItems = await prisma.orderItems.findMany({
-            where: {
-                orderNumber: item.orderNumber,
-                status: { not: "ready" },
-            },
-        });
+            // Any items in this order still not ready?
+            const remainingItems = await tx.orderItems.findMany({
+                where: {
+                    orderNumber: item.orderNumber,
+                    status: { not: "ready" },
+                },
+            });
 
-        // Step 4: if nothing is left, mark the order as ready
-        if (remainingItems.length === 0) {
-            await prisma.orders.update({
+            if (remainingItems.length > 0) {
+                return false;
+            }
+
+            // Nothing left — the order moves from preparing to ready, and we log it.
+            await tx.orders.update({
                 where: { number: item.orderNumber },
                 data: { status: "ready" },
             });
-        }
+
+            await recordStatusChange(tx, item.orderNumber, "preparing", "ready", req.user?.Id ?? null);
+
+            return true;
+        });
 
         res.status(200).json({
             data: {
                 message: "Item marked as ready",
-                orderReady: remainingItems.length === 0,
+                orderReady,
             },
         });
         return;

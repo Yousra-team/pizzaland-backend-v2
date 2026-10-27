@@ -3,13 +3,13 @@ import {sendWhatsapp} from "../sendWhatsapp.js";
 
 const CONTENT_SID = "HX36d3c8463fcba28279ce63900f27d92f";
 
-const CONTENT_SID_FR =""
+const CONTENT_SID_FR ="HXb783bb4b1bb981b9da2d65c7bbf81f50"
 
 async function sendOrderPaymentConfirmation(params: {
     to: string;
     customerName: string;
     orderNumber: string;
-    amountPaid: number;
+    amountPaid: string;
     paymentMethod: string;
     date: string;
 }) {
@@ -26,7 +26,7 @@ async function sendOrderPaymentConfirmationFR(params: {
     to: string;
     customerName: string;
     orderNumber: string;
-    amountPaid: number;
+    amountPaid: string;
     paymentMethod: string;
     date: string;
 }) {

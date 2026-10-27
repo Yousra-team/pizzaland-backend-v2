@@ -4,6 +4,7 @@ const prismaMock = vi.hoisted(() => ({
     employees: { findUnique: vi.fn(), findMany: vi.fn() },
     deliveries: { findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     orders: { update: vi.fn() },
+    orderStatusHistory: { create: vi.fn() },
     $transaction: vi.fn(),
 }));
 vi.mock("../../source/lib/prisma.js", () => ({ prisma: prismaMock }));
@@ -309,5 +310,20 @@ describe("updateDeliveryStatus", () => {
 
         expect(res.status).toHaveBeenCalledWith(409);
         expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    // The driver moves the ORDER too (out_for_delivery, delivered): that is an order status change,
+    // so it belongs in the audit log like every other one (schema.prisma, OrderStatusHistory)
+    it.each([
+        ["in_transit", "out_for_delivery"],
+        ["delivered", "delivered"],
+    ])("BUG #16: records the order's move to %s in OrderStatusHistory", async (deliveryStatus, orderStatus) => {
+        await updateDeliveryStatus(req(deliveryStatus), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create.mock.calls[0]?.[0].data).toMatchObject({
+            orderNumber: "ORD-1",
+            toStatus: orderStatus,
+            changedByEmail: driver.Id,
+        });
     });
 });

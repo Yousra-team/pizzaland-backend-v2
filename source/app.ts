@@ -25,7 +25,7 @@ app.use(cors({
         "http://localhost:5701",
         "http://localhost:5702",
         "https://pizzaland.cm",
-        "https://admin.pizzaland.cm"
+        "https://admins.pizzaland.cm"
     ],
     credentials: true,
     methods: ['GET','POST','PUT','DELETE','OPTIONS'],

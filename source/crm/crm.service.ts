@@ -265,10 +265,10 @@ export const myBalance = async (req: Request, res: Response): Promise<void> => {
 
         const YousraCoins = customer.accounts?.balance;
 
-        if (!YousraCoins) {
-            res.status(400).json({ message: "There is no account or account balance found" });
-            return;
-        }
+        if (YousraCoins === undefined || YousraCoins === null) {
+           res.status(400).json({ message: "There is no account or account balance found" });
+           return;
+         }
 
         const balanceInXAF = convertToCurrency(YousraCoins);
 

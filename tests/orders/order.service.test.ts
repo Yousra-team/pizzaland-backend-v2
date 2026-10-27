@@ -10,7 +10,9 @@ const prismaMock = vi.hoisted(() => ({
     customers: { findUnique: vi.fn() },
     employees: { findUnique: vi.fn() },
     orders: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), findUniqueOrThrow: vi.fn() },
-    orderItems: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    orderItems: { create: vi.fn(), createMany: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    orderStatusHistory: { create: vi.fn() },
+    pointsTransaction: { create: vi.fn() },
     deliveries: { create: vi.fn(), updateMany: vi.fn() },
     pickupOrders: { create: vi.fn(), updateMany: vi.fn() },
     dineInOrders: { create: vi.fn(), updateMany: vi.fn() },
@@ -45,11 +47,27 @@ import { mockReq, mockRes } from "../helpers/http.js";
 const NOW = new Date("2026-10-24T10:00:00Z");
 const minutesFromNow = (minutes: number) => new Date(NOW.getTime() + minutes * 60 * 1000);
 
+// The fake counter answers "<TYPE>-PZ20261024-0001", so the order number is this one
+const ORDER_NO = "ORD-PZ20261024-0001";
+
 const cashier = { Id: "cashier@yousracompany.com", role: "CASHIER" };
 const customer = { Id: "cust_1", role: "CUSTOMER" };
 
-// What the saved order looked like
+// What was saved: the order, its items (one createMany) and its first history row
 const createdOrder = () => prismaMock.orders.create.mock.calls[0][0].data;
+const createdItems = () => prismaMock.orderItems.createMany.mock.calls[0][0].data;
+const createdHistory = () => prismaMock.orderStatusHistory.create.mock.calls[0][0].data;
+
+// The counter fails only for one type, so the code gets past the other ids first
+const counterFailsFor = (failingType: string) =>
+    vi.mocked(CreateIdentifier).mockImplementation(async (type: string) =>
+        type === failingType ? undefined : `${type}-PZ20261024-0001`);
+
+// An error thrown inside the callback must come out of $transaction: that is what makes Prisma roll back
+const transactionWasRolledBack = async () => {
+    const outcome = prismaMock.$transaction.mock.results[0].value;
+    await expect(outcome).rejects.toBeDefined();
+};
 
 beforeEach(() => {
     vi.resetAllMocks();
@@ -61,7 +79,7 @@ beforeEach(() => {
 
     // A default menu card: one pizza at 4500 that takes 15 minutes
     prismaMock.products.findUnique.mockResolvedValue({ price: 4500, preparationTime: 15 });
-    prismaMock.orders.create.mockImplementation(({ data }: any) => Promise.resolve({ number: "ORD-1", ...data }));
+    prismaMock.orders.create.mockImplementation(({ data }: any) => Promise.resolve({ ...data }));
     vi.mocked(CreateIdentifier).mockImplementation(async (type: string) => `${type}-PZ20261024-0001`);
 });
 
@@ -82,7 +100,8 @@ describe("placeOrder", () => {
         expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
 
-    // Prices always come from the database (CLAUDE.md, decision 3)
+    // ── Prices: always from the database (CLAUDE.md, decision 3) ──
+
     it("computes the subtotal from database prices and ignores client prices", async () => {
         const res = mockRes();
 
@@ -92,24 +111,31 @@ describe("placeOrder", () => {
         expect(res.status).toHaveBeenCalledWith(201);
     });
 
+    it("takes the order number from the counter", async () => {
+        await placeOrder(mockReq({ user: cashier, body: pickupBody() }), mockRes());
+
+        expect(CreateIdentifier).toHaveBeenCalledWith("ORD");
+        expect(createdOrder().number).toBe(ORDER_NO);
+    });
+
     it("uses the variant price instead of the product price", async () => {
         prismaMock.productVariants.findUnique.mockResolvedValue({ price: 6500, productId: "p1" });
 
         await placeOrder(mockReq({ user: cashier, body: pickupBody([{ ...pizza(2), productVariantId: "v_large" }]) }), mockRes());
 
         expect(createdOrder().subtotal).toBe(13000);
-        expect(prismaMock.orderItems.create.mock.calls[0][0].data.price).toBe(6500);
+        expect(createdItems()[0].price).toBe(6500);
     });
 
     // Otherwise a cheap variant of another product could be used to pay less
-    it("creates no order when the variant belongs to another product", async () => {
+    it("answers 400 and creates no order when the variant belongs to another product", async () => {
         prismaMock.productVariants.findUnique.mockResolvedValue({ price: 100, productId: "p_other" });
         const res = mockRes();
 
         await placeOrder(mockReq({ user: cashier, body: pickupBody([{ ...pizza(), productVariantId: "v_x" }]) }), res);
 
+        expect(res.status).toHaveBeenCalledWith(400);
         expect(prismaMock.orders.create).not.toHaveBeenCalled();
-        expect(res.status).not.toHaveBeenCalledWith(201);
     });
 
     it("adds up products, menus and addons", async () => {
@@ -126,7 +152,8 @@ describe("placeOrder", () => {
         }), mockRes());
 
         expect(createdOrder().subtotal).toBe(4500 + 12000 + 1500);
-        expect(prismaMock.orderItems.create).toHaveBeenCalledTimes(3);
+        expect(createdItems()).toHaveLength(3);
+        expect(createdItems().every((item: any) => item.orderNumber === ORDER_NO)).toBe(true);
     });
 
     it("gives each item its own estimatedReadyAt from its preparation time", async () => {
@@ -134,16 +161,34 @@ describe("placeOrder", () => {
 
         await placeOrder(mockReq({ user: cashier, body: pickupBody([pizza(), { type: "addons", addonId: "a1", quantity: 1 }]) }), mockRes());
 
-        const [pizzaItem, addonItem] = prismaMock.orderItems.create.mock.calls.map((call: any) => call[0].data);
+        const [pizzaItem, addonItem] = createdItems();
         expect(pizzaItem).toMatchObject({ status: "pending", estimatedReadyAt: minutesFromNow(15) });
         expect(addonItem).toMatchObject({ addonId: "a1", estimatedReadyAt: minutesFromNow(0) });
     });
+
+    it.each([
+        ["product", { products: null }, pizza()],
+        ["menu", { menu: null }, { type: "menu", menuId: "m1", quantity: 1 }],
+        ["addon", { addons: null }, { type: "addons", addonId: "a1", quantity: 1 }],
+    ])("answers 404 when the %s does not exist, and rolls back", async (_label, missing, item) => {
+        const [model] = Object.keys(missing) as ("products" | "menu" | "addons")[];
+        prismaMock[model].findUnique.mockResolvedValue(null);
+        const res = mockRes();
+
+        await placeOrder(mockReq({ user: cashier, body: pickupBody([item]) }), res);
+
+        expect(res.status).toHaveBeenCalledTimes(1);
+        expect(res.status).toHaveBeenCalledWith(404);
+        await transactionWasRolledBack();
+    });
+
+    // ── Order types ──
 
     it("pickup: uses the branch from the body and creates the pickup row", async () => {
         await placeOrder(mockReq({ user: cashier, body: pickupBody() }), mockRes());
 
         expect(prismaMock.pickupOrders.create).toHaveBeenCalledWith({
-            data: { id: "PICKUP-PZ20261024-0001", orderNumber: "ORD-1", pickupTime: new Date("2026-10-24T12:00:00Z") },
+            data: { id: "PICKUP-PZ20261024-0001", orderNumber: ORDER_NO, pickupTime: new Date("2026-10-24T12:00:00Z") },
         });
     });
 
@@ -160,7 +205,7 @@ describe("placeOrder", () => {
         expect(prismaMock.deliveries.create).toHaveBeenCalledWith({
             data: {
                 id: "DEL-PZ20261024-0001",
-                orderNumber: "ORD-1",
+                orderNumber: ORDER_NO,
                 shippingAddressName: "Bastos",
                 status: "pending",
                 estimatedDeliveryTime: minutesFromNow(25 + 30), // the menu (25 min) is the slowest item
@@ -168,24 +213,151 @@ describe("placeOrder", () => {
         });
     });
 
-    it("dineIn: takes the branch from the table's floor and creates the dine-in row", async () => {
+    it("delivery: answers 404 for an unknown shipping address", async () => {
+        prismaMock.shippingAddresses.findUnique.mockResolvedValue(null);
+        const res = mockRes();
+
+        await placeOrder(mockReq({ user: cashier, body: { orderType: "delivery", shippingAddressName: "Nowhere", items: [pizza()] } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(404);
+        expect(prismaMock.orders.create).not.toHaveBeenCalled();
+    });
+
+    // A client could otherwise send a branchId to put the order in another branch's kitchen
+    it("dineIn: takes the branch from the table's floor, not from the body", async () => {
         prismaMock.table.findUnique.mockResolvedValue({ floorId: "f1", floor: { branchId: "br_3" } });
 
-        await placeOrder(mockReq({ user: cashier, body: { orderType: "dineIn", tableId: "tbl_1", items: [pizza()] } }), mockRes());
+        await placeOrder(mockReq({ user: cashier, body: { orderType: "dineIn", tableId: "tbl_1", branchId: "br_other", items: [pizza()] } }), mockRes());
 
         expect(createdOrder().branchId).toBe("br_3");
         expect(prismaMock.dineInOrders.create).toHaveBeenCalledWith({
-            data: { id: "DINE-PZ20261024-0001", orderNumber: "ORD-1", tableId: "tbl_1" },
+            data: { id: "DINE-PZ20261024-0001", orderNumber: ORDER_NO, tableId: "tbl_1" },
         });
     });
 
-    it("rewards the customer with 10% of the total in coins, inside the transaction", async () => {
+    // ── Who the order belongs to, and who placed it ──
+
+    // regression: was BUG #3
+    it("a customer's order is saved with their customerId and no employee", async () => {
+        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_1", accounts: null });
+
+        await placeOrder(mockReq({ user: customer, body: pickupBody() }), mockRes());
+
+        expect(createdOrder()).toMatchObject({ customerId: "cust_1", payrollEmployeeEmail: undefined });
+        expect(createdOrder()).not.toHaveProperty("customerPhone");
+    });
+
+    // SECURITY: the token decides who orders. A customer must not be able to put their order
+    // (and its unpaid bill) on someone else's account by sending that person's phone.
+    it("ignores a customerPhone sent by a customer", async () => {
+        prismaMock.customers.findUnique.mockImplementation(({ where }: any) =>
+            Promise.resolve(where.customerId === "cust_1" ? { customerId: "cust_1", accounts: null } : { customerId: "victim" }));
+
+        await placeOrder(mockReq({ user: customer, body: { ...pickupBody(), customerPhone: "+237699000000" } }), mockRes());
+
+        expect(createdOrder().customerId).toBe("cust_1");
+    });
+
+    // regression: was BUG #3 and #5
+    it("a cashier ordering for a customer links the customer's id, found by phone", async () => {
+        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_9", accounts: null });
+
+        await placeOrder(mockReq({ user: cashier, body: { ...pickupBody(), customerPhone: "+237699000000" } }), mockRes());
+
+        expect(prismaMock.customers.findUnique.mock.calls[0][0].where).toEqual({ phone: "+237699000000" });
+        expect(createdOrder()).toMatchObject({ customerId: "cust_9" });
+        expect(createdOrder()).not.toHaveProperty("cashierEmail");
+        expect(createdOrder()).not.toHaveProperty("waitressEmail");
+    });
+
+    // regression: was BUG #4
+    it("answers 400 once and rolls back when the customer phone is unknown", async () => {
+        prismaMock.customers.findUnique.mockResolvedValue(null);
+        const res = mockRes();
+
+        await placeOrder(mockReq({ user: cashier, body: { ...pickupBody(), customerPhone: "+237699000000" } }), res);
+
+        expect(res.status).toHaveBeenCalledTimes(1);
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(prismaMock.orders.create).not.toHaveBeenCalled();
+    });
+
+    // regression: was BUG #5
+    it("an employee's own order is saved with payrollEmployeeEmail", async () => {
+        await placeOrder(mockReq({ user: cashier, body: pickupBody() }), mockRes());
+
+        expect(createdOrder()).toMatchObject({ payrollEmployeeEmail: cashier.Id, customerId: undefined });
+        expect(createdOrder()).not.toHaveProperty("employeeEmail");
+    });
+
+    // The first history row records who placed the order (schema.prisma, OrderStatusHistory)
+    it.each([
+        ["a customer (no employee)", customer, {}, null],
+        ["a cashier for a customer", cashier, { customerPhone: "+237699000000" }, cashier.Id],
+        ["an employee for themselves", cashier, {}, cashier.Id],
+    ])("writes the creation history row for %s", async (_label, user, extra, changedByEmail) => {
+        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_1", accounts: null });
+
+        await placeOrder(mockReq({ user, body: { ...pickupBody(), ...extra } }), mockRes());
+
+        expect(createdHistory()).toEqual({
+            id: "OSH-PZ20261024-0001",
+            orderNumber: ORDER_NO,
+            fromStatus: null,
+            toStatus: "pending",
+            changedByEmail,
+        });
+    });
+
+    // regression: was BUG #4
+    it("answers 500 once and rolls back when no delivery id could be made", async () => {
+        prismaMock.shippingAddresses.findUnique.mockResolvedValue({ deliveryFee: 1000, deliveryTime: 30, branchId: "br_2" });
+        counterFailsFor("DEL");
+        const res = mockRes();
+
+        await placeOrder(mockReq({ user: cashier, body: { orderType: "delivery", shippingAddressName: "Bastos", items: [pizza()] } }), res);
+
+        expect(res.status).toHaveBeenCalledTimes(1);
+        expect(res.status).toHaveBeenCalledWith(500);
+        await transactionWasRolledBack(); // the order row created before must not survive
+    });
+
+    // ── Yousra coins reward ──
+
+    it("rewards the customer with 10% of the total in coins and logs it in the ledger", async () => {
         prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_9", accounts: { balance: 0 } });
 
         await placeOrder(mockReq({ user: cashier, body: { ...pickupBody([pizza(2)]), customerPhone: "+237699000000" } }), mockRes());
 
-        // 10% of 9000 XAF = 900 XAF = 36 coins
+        // 10% of 9000 XAF = 900 XAF = 36 coins, credited inside the order's transaction
         expect(creditAccount).toHaveBeenCalledWith("cust_9", 36, prismaMock);
+        expect(prismaMock.pointsTransaction.create.mock.calls[0][0].data).toMatchObject({
+            amount: 36,
+            fromCustomerId: null, // null = coins created by the system, not sent by a customer
+            toCustomerId: "cust_9",
+            orderNumber: ORDER_NO,
+        });
+    });
+
+    // regression: was BUG #3 (the reward lookup used the phone column with a customerId)
+    it("rewards a customer who orders for themselves", async () => {
+        prismaMock.customers.findUnique.mockImplementation(({ where }: any) =>
+            Promise.resolve(where.customerId === "cust_1" ? { customerId: "cust_1", accounts: { balance: 0 } } : null));
+        const res = mockRes();
+
+        await placeOrder(mockReq({ user: customer, body: pickupBody([pizza(2)]) }), res);
+
+        expect(creditAccount).toHaveBeenCalledWith("cust_1", 36, prismaMock);
+        expect(res.status).toHaveBeenCalledTimes(1);
+        expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    // Employees are paid by payroll, they don't collect customer coins
+    it("gives no reward for an employee's own order", async () => {
+        await placeOrder(mockReq({ user: cashier, body: pickupBody() }), mockRes());
+
+        expect(creditAccount).not.toHaveBeenCalled();
+        expect(prismaMock.pointsTransaction.create).not.toHaveBeenCalled();
     });
 
     it("gives no reward when the customer has no account", async () => {
@@ -205,72 +377,21 @@ describe("placeOrder", () => {
         expect(creditAccount).not.toHaveBeenCalled(); // 10% of 1 XAF = 0.004 coins -> 0
     });
 
-    // ── Bugs ──
-
-    // Orders now point to customers by customerId; the token's Id IS the customerId
-    it("BUG #3: saves a customer's order with customerId and credits their reward", async () => {
-        prismaMock.customers.findUnique.mockImplementation(({ where }: any) =>
-            Promise.resolve(where.customerId === "cust_1" ? { customerId: "cust_1", accounts: { balance: 0 } } : null));
-        const res = mockRes();
-
-        await placeOrder(mockReq({ user: customer, body: pickupBody([pizza(2)]) }), res);
-
-        expect(createdOrder()).toMatchObject({ customerId: "cust_1" });
-        expect(createdOrder()).not.toHaveProperty("customerPhone");
-        expect(creditAccount).toHaveBeenCalledWith("cust_1", 36, prismaMock);
-        expect(res.status).toHaveBeenCalledTimes(1);
-        expect(res.status).toHaveBeenCalledWith(201);
-    });
-
-    it("BUG #3: links a staff order to the customer's customerId, found by phone", async () => {
-        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_9", accounts: null });
-
-        await placeOrder(mockReq({ user: cashier, body: { ...pickupBody(), customerPhone: "+237699000000" } }), mockRes());
-
-        expect(createdOrder()).toMatchObject({ customerId: "cust_9" });
-        expect(createdOrder()).not.toHaveProperty("customerPhone");
-    });
-
-    // A response sent inside the transaction is followed by a second res.status(201)
-    it("BUG #4: sends exactly one error response when the customer phone is unknown", async () => {
-        prismaMock.customers.findUnique.mockResolvedValue(null);
+    // A wallet failure must cancel the whole order, not leave an order without its reward
+    it("rolls the order back when crediting the reward fails", async () => {
+        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_9", accounts: { balance: 0 } });
+        vi.mocked(creditAccount).mockRejectedValue(new Error("db down"));
         const res = mockRes();
 
         await placeOrder(mockReq({ user: cashier, body: { ...pickupBody(), customerPhone: "+237699000000" } }), res);
 
-        expect(res.status).toHaveBeenCalledTimes(1);
-        expect(res.status).not.toHaveBeenCalledWith(201);
+        expect(res.status).toHaveBeenCalledWith(500);
+        await transactionWasRolledBack();
     });
 
-    it("BUG #4: sends exactly one error response when no delivery id could be made", async () => {
-        prismaMock.shippingAddresses.findUnique.mockResolvedValue({ deliveryFee: 1000, deliveryTime: 30, branchId: "br_2" });
-        vi.mocked(CreateIdentifier).mockResolvedValue(undefined);
-        const res = mockRes();
+    // ── Still open ──
 
-        await placeOrder(mockReq({ user: cashier, body: { orderType: "delivery", shippingAddressName: "Bastos", items: [pizza()] } }), res);
-
-        expect(res.status).toHaveBeenCalledTimes(1);
-        expect(res.status).not.toHaveBeenCalledWith(201);
-    });
-
-    // cashierEmail / waitressEmail were dropped from Orders (schema.prisma header)
-    it("BUG #5: a cashier's order only uses columns that exist on Orders", async () => {
-        prismaMock.customers.findUnique.mockResolvedValue({ customerId: "cust_9", accounts: null });
-
-        await placeOrder(mockReq({ user: cashier, body: { ...pickupBody(), customerPhone: "+237699000000" } }), mockRes());
-
-        expect(createdOrder()).not.toHaveProperty("cashierEmail");
-        expect(createdOrder()).not.toHaveProperty("waitressEmail");
-    });
-
-    // An employee ordering for themselves is the payroll customer of the order
-    it("BUG #5: an employee's own order is saved with payrollEmployeeEmail", async () => {
-        await placeOrder(mockReq({ user: cashier, body: pickupBody() }), mockRes());
-
-        expect(createdOrder()).toMatchObject({ payrollEmployeeEmail: cashier.Id });
-        expect(createdOrder()).not.toHaveProperty("employeeEmail");
-    });
-
+    // FRONTEND_API_CONVENTIONS §5: "If a product has variants, productVariantId is required"
     it("BUG #11: answers 400 INVALID_VARIANT when a product with variants is ordered without one", async () => {
         prismaMock.products.findUnique.mockResolvedValue({ price: 4500, preparationTime: 15, variants: [{ id: "v_large" }] });
         prismaMock.productVariants.findMany.mockResolvedValue([{ id: "v_large" }]);
@@ -283,27 +404,20 @@ describe("placeOrder", () => {
         expect(JSON.stringify(res.json.mock.calls[0][0])).toContain("INVALID_VARIANT");
         expect(prismaMock.orders.create).not.toHaveBeenCalled();
     });
-
-    // A wrong product id is the client's mistake, not a server crash
-    it("BUG #11: answers 404, not 500, when a product does not exist", async () => {
-        prismaMock.products.findUnique.mockResolvedValue(null);
-        const res = mockRes();
-
-        await placeOrder(mockReq({ user: cashier, body: pickupBody() }), res);
-
-        expect(res.status).toHaveBeenCalledWith(404);
-    });
 });
 
 describe("GuestplaceOrder", () => {
     const guest = { guestName: "Paul", guestPhone: "+237699111111" };
+    const guestItem = () => prismaMock.orderItems.create.mock.calls[0][0].data;
 
     it("saves the guest's name and phone with server-side prices", async () => {
         const res = mockRes();
 
         await GuestplaceOrder(mockReq({ body: { ...pickupBody([pizza(2)]), ...guest } }), res);
 
-        expect(createdOrder()).toMatchObject({ ...guest, subtotal: 9000, total: 9000, branchId: "br_1" });
+        expect(createdOrder()).toMatchObject({ ...guest, number: ORDER_NO, subtotal: 9000, total: 9000, branchId: "br_1" });
+        expect(createdOrder().customerId).toBeUndefined();
+        expect(guestItem()).toMatchObject({ orderNumber: ORDER_NO, price: 4500, quantity: 2 });
         expect(res.status).toHaveBeenCalledWith(201);
     });
 
@@ -322,14 +436,41 @@ describe("GuestplaceOrder", () => {
         expect(prismaMock.dineInOrders.create).toHaveBeenCalled();
     });
 
-    it("BUG #4: sends exactly one error response when no pickup id could be made", async () => {
-        vi.mocked(CreateIdentifier).mockResolvedValue(undefined);
+    // Same response-inside-the-transaction pattern that was fixed in placeOrder:
+    // the 500 is sent, the transaction "succeeds" (the order is kept!), then res.status(201) runs.
+    it.each(["PICKUP", "DEL", "DINE"])("BUG #4: answers once and rolls back when the %s id can't be made", async (type) => {
+        prismaMock.shippingAddresses.findUnique.mockResolvedValue({ deliveryFee: 1000, deliveryTime: 30, branchId: "br_2" });
+        prismaMock.table.findUnique.mockResolvedValue({ floorId: "f1", floor: { branchId: "br_3" } });
+        counterFailsFor(type);
+        const body = {
+            PICKUP: pickupBody(),
+            DEL: { orderType: "delivery", shippingAddressName: "Bastos", items: [pizza()] },
+            DINE: { orderType: "dineIn", tableId: "tbl_1", items: [pizza()] },
+        }[type];
+        const res = mockRes();
+
+        await GuestplaceOrder(mockReq({ body: { ...body, ...guest } }), res);
+
+        expect(res.status).toHaveBeenCalledTimes(1);
+        expect(res.status).not.toHaveBeenCalledWith(201);
+        await transactionWasRolledBack();
+    });
+
+    it("BUG #11: answers 404, not 500, when a product does not exist", async () => {
+        prismaMock.products.findUnique.mockResolvedValue(null);
         const res = mockRes();
 
         await GuestplaceOrder(mockReq({ body: { ...pickupBody(), ...guest } }), res);
 
-        expect(res.status).toHaveBeenCalledTimes(1);
-        expect(res.status).not.toHaveBeenCalledWith(201);
+        expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    // placeOrder writes it, the guest version doesn't: guest orders have an empty audit trail
+    it("BUG #15: writes the creation history row (fromStatus null -> pending)", async () => {
+        await GuestplaceOrder(mockReq({ body: { ...pickupBody(), ...guest } }), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create).toHaveBeenCalledTimes(1);
+        expect(createdHistory()).toMatchObject({ orderNumber: ORDER_NO, fromStatus: null, toStatus: "pending", changedByEmail: null });
     });
 });
 
@@ -360,9 +501,11 @@ describe("getOrdersByBranch", () => {
         expect(res.status).toHaveBeenCalledWith(400);
     });
 
+    // The branch comes from the employee's record, never from the request
     it.each([
         [{}, { branchId: "br_1" }],
         [{ status: "pending" }, { branchId: "br_1", status: "pending" }],
+        [{ status: "pending", branchId: "br_other" }, { branchId: "br_1", status: "pending" }],
     ])("query %j filters with %j", async (query, where) => {
         prismaMock.employees.findUnique.mockResolvedValue({ branchId: "br_1", role: "CASHIER" });
         prismaMock.orders.findMany.mockResolvedValue([]);
@@ -387,6 +530,7 @@ describe("getMyOrders", () => {
         expect(prismaMock.orders.findMany.mock.calls[0][0].where.status).toEqual(status);
     });
 
+    // Orders has no customerPhone column any more: Prisma throws, so customers get a 500
     it("BUG #6: only returns the logged-in customer's orders, by customerId", async () => {
         prismaMock.orders.findMany.mockResolvedValue([]);
 
@@ -402,8 +546,9 @@ describe("updateOrder", () => {
     const req = (body: any) => mockReq({ user: cashier, params: { number: "ORD-1" }, body });
 
     beforeEach(() => {
-        prismaMock.orders.findUnique.mockResolvedValue({ orderType: "pickup", subtotal: 10000, discount: 1000, total: 9000 });
+        prismaMock.orders.findUnique.mockResolvedValue({ orderType: "pickup", subtotal: 10000, discount: 1000, total: 9000, status: "pending" });
         prismaMock.orders.findUniqueOrThrow.mockResolvedValue({ number: "ORD-1" });
+        prismaMock.employees.findUnique.mockResolvedValue({ email: "waiter@yousracompany.com", role: "WAITER" });
     });
 
     it("answers 403 for a customer", async () => {
@@ -487,10 +632,8 @@ describe("updateOrder", () => {
 
         await updateOrder(req({ discount: 2500 }), res);
 
-        expect(prismaMock.orders.update).toHaveBeenCalledWith({
-            where: { number: "ORD-1" },
-            data: { status: undefined, discount: 2500, total: 7500, employeeEmail: undefined },
-        });
+        expect(prismaMock.orders.update.mock.calls[0][0].where).toEqual({ number: "ORD-1" });
+        expect(prismaMock.orders.update.mock.calls[0][0].data).toMatchObject({ discount: 2500, total: 7500 });
         expect(res.status).toHaveBeenCalledWith(200);
     });
 
@@ -515,14 +658,35 @@ describe("updateOrder", () => {
             data: { driverEmail: "d@yousracompany.com", status: "assigned" },
         });
     });
+
+    // Orders has no employeeEmail column (schema.prisma): Prisma rejects the update -> 500
+    it("BUG #17: never writes employeeEmail into Orders", async () => {
+        await updateOrder(req({ employeeEmail: "waiter@yousracompany.com" }), mockRes());
+
+        const update = prismaMock.orders.update.mock.calls[0]?.[0];
+        expect(update?.data?.employeeEmail).toBeUndefined();
+    });
+
+    // "Append-only log of every order status transition. Written in the same $transaction" (schema.prisma)
+    it("BUG #16: records the status change in OrderStatusHistory", async () => {
+        await updateOrder(req({ status: "ready" }), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create.mock.calls[0]?.[0].data).toMatchObject({
+            orderNumber: "ORD-1",
+            toStatus: "ready",
+            changedByEmail: cashier.Id,
+        });
+    });
 });
 
 describe("updateOrderStatus", () => {
+    const req = (query: any) => mockReq({ user: cashier, params: { number: "ORD-1" }, query });
+
     it("sets the status from the query", async () => {
         prismaMock.orders.update.mockResolvedValue({ number: "ORD-1" });
         const res = mockRes();
 
-        await updateOrderStatus(mockReq({ params: { number: "ORD-1" }, query: { status: "ready" } }), res);
+        await updateOrderStatus(req({ status: "ready" }), res);
 
         expect(prismaMock.orders.update.mock.calls[0][0]).toMatchObject({ where: { number: "ORD-1" }, data: { status: "ready" } });
         expect(res.status).toHaveBeenCalledWith(200);
@@ -531,7 +695,7 @@ describe("updateOrderStatus", () => {
     it("answers 400 for an unknown status", async () => {
         const res = mockRes();
 
-        await updateOrderStatus(mockReq({ params: { number: "ORD-1" }, query: { status: "lost" } }), res);
+        await updateOrderStatus(req({ status: "lost" }), res);
 
         expect(res.status).toHaveBeenCalledWith(400);
     });
@@ -539,10 +703,22 @@ describe("updateOrderStatus", () => {
     it("BUG #12: answers 400 when ?status is missing", async () => {
         const res = mockRes();
 
-        await updateOrderStatus(mockReq({ params: { number: "ORD-1" }, query: {} }), res);
+        await updateOrderStatus(req({}), res);
 
         expect(res.status).toHaveBeenCalledWith(400);
         expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it("BUG #16: records the status change in OrderStatusHistory", async () => {
+        prismaMock.orders.update.mockResolvedValue({ number: "ORD-1" });
+
+        await updateOrderStatus(req({ status: "ready" }), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create.mock.calls[0]?.[0].data).toMatchObject({
+            orderNumber: "ORD-1",
+            toStatus: "ready",
+            changedByEmail: cashier.Id,
+        });
     });
 });
 
@@ -577,7 +753,8 @@ describe("deleteOrders", () => {
 });
 
 describe("dispatchOrder", () => {
-    const req = () => mockReq({ params: { number: "ORD-1" } });
+    const chef = { Id: "chef@yousracompany.com", role: "KITCHEN_CHEF" };
+    const req = () => mockReq({ user: chef, params: { number: "ORD-1" } });
 
     it("answers 404 when the order does not exist", async () => {
         prismaMock.orders.findUnique.mockResolvedValue(null);
@@ -609,6 +786,19 @@ describe("dispatchOrder", () => {
 
         expect(res.status).toHaveBeenCalledWith(409);
         expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it("BUG #16: records pending -> preparing in OrderStatusHistory", async () => {
+        prismaMock.orders.findUnique.mockResolvedValue({ number: "ORD-1", status: "pending" });
+
+        await dispatchOrder(req(), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create.mock.calls[0]?.[0].data).toMatchObject({
+            orderNumber: "ORD-1",
+            fromStatus: "pending",
+            toStatus: "preparing",
+            changedByEmail: chef.Id,
+        });
     });
 });
 
@@ -693,7 +883,8 @@ describe("getStationOrders", () => {
 });
 
 describe("updateOrderItemStatus", () => {
-    const req = () => mockReq({ params: { itemId: "item_1" } });
+    const staff = { Id: "staff@yousracompany.com", role: "KITCHEN_STAFF" };
+    const req = () => mockReq({ user: staff, params: { itemId: "item_1" } });
 
     it("answers 404 when the item does not exist", async () => {
         prismaMock.orderItems.findUnique.mockResolvedValue(null);
@@ -735,5 +926,18 @@ describe("updateOrderItemStatus", () => {
 
         expect(prismaMock.orders.update).toHaveBeenCalledWith({ where: { number: "ORD-1" }, data: { status: "ready" } });
         expect(res.json.mock.calls[0][0].data.orderReady).toBe(true);
+    });
+
+    it("BUG #16: records preparing -> ready in OrderStatusHistory when the order becomes ready", async () => {
+        prismaMock.orderItems.findUnique.mockResolvedValue({ id: "item_1", status: "in_station", orderNumber: "ORD-1" });
+        prismaMock.orderItems.findMany.mockResolvedValue([]);
+
+        await updateOrderItemStatus(req(), mockRes());
+
+        expect(prismaMock.orderStatusHistory.create.mock.calls[0]?.[0].data).toMatchObject({
+            orderNumber: "ORD-1",
+            toStatus: "ready",
+            changedByEmail: staff.Id,
+        });
     });
 });

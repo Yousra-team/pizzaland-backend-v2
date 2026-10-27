@@ -803,6 +803,10 @@ model Floor {
 model Counter {
   id    String     @id @default(uuid())
   type  countTypes
+  year  Int
+  month Int
   day   Int
   count Int
+
+  @@unique([type, year, month, day, count])
 }

@@ -9,8 +9,6 @@ vi.mock("../../source/lib/prisma.js", () => ({ prisma: prismaMock }));
 import { myCashierOrWaitressHistory } from "../../source/pos/pos.service.js";
 import { mockReq, mockRes } from "../helpers/http.js";
 
-// Only the role checks are tested here. The query itself uses cashierEmail / employeeEmail,
-// which were dropped from Orders; the new query (through OrderStatusHistory) is still to be decided.
 beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -44,13 +42,30 @@ describe("myCashierOrWaitressHistory", () => {
         expect(prismaMock.orders.findMany).not.toHaveBeenCalled();
     });
 
-    it.each(["CASHIER", "WAITER"])("answers 200 for a %s", async (role) => {
-        prismaMock.employees.findUnique.mockResolvedValue({ email: "x@yousracompany.com", role });
+    // "Who placed the order" is the first history row: fromStatus null, changedByEmail = the employee.
+    // Matching any history row instead would also list orders this person only moved to "ready".
+    it.each(["CASHIER", "WAITER"])("lists the orders a %s placed, newest first", async (role) => {
+        prismaMock.employees.findUnique.mockResolvedValue({ role });
         prismaMock.orders.findMany.mockResolvedValue([]);
         const res = mockRes();
 
         await myCashierOrWaitressHistory(mockReq({ user: { Id: "x@yousracompany.com", role } }), res);
 
+        const query = prismaMock.orders.findMany.mock.calls[0][0];
+        expect(query.where).toEqual({
+            statusHistory: { some: { fromStatus: null, changedByEmail: "x@yousracompany.com" } },
+        });
+        expect(query.orderBy).toEqual({ createdAt: "desc" });
         expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    // The role comes from the database, not the token: a stale token can't keep old rights
+    it("uses the role saved in the database, not the one in the token", async () => {
+        prismaMock.employees.findUnique.mockResolvedValue({ role: "DELIVERY_DRIVER" });
+        const res = mockRes();
+
+        await myCashierOrWaitressHistory(mockReq({ user: { Id: "x@yousracompany.com", role: "CASHIER" } }), res);
+
+        expect(res.status).toHaveBeenCalledWith(403);
     });
 });

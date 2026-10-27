@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { deliveryStatusSchema } from "../source/delivery/delivery.schema.js";
-import { paymentDetailsSchema } from "../source/payments/paymentSchema.js";
-import { promotionCondition } from "../source/promotions/promotionSchema.js";
+import { paymentDetailsSchema, paymentSchema } from "../source/payments/paymentSchema.js";
+import { promotionCondition, promotionBenefit, promotionSchema } from "../source/promotions/promotionSchema.js";
 import { typeSchema } from "../source/utilities/counterSchema.js";
 
 describe("deliveryStatusSchema", () => {
@@ -16,10 +16,15 @@ describe("deliveryStatusSchema", () => {
 });
 
 describe("paymentDetailsSchema", () => {
-    const payment = { user: "Awa", phone: "+237677123456", orderNumber: "ORD-1", amount: 5000, operator: "OM", locale: "fr" };
+    const payment = { user: "Awa", phone: "+237677123456", orderNumber: "ORD-1", amount: 5000, operator: "CM_ORANGEMONEY", locale: "fr" };
 
-    it("accepts a valid payment", () => {
-        expect(paymentDetailsSchema.safeParse(payment).success).toBe(true);
+    it.each(["CM_ORANGEMONEY", "CM_MTNMOBILEMONEY"])("accepts operator %s", (operator) => {
+        expect(paymentDetailsSchema.safeParse({ ...payment, operator }).success).toBe(true);
+    });
+
+    // The old short codes are gone: a frontend still sending them gets a clear 400
+    it.each(["OM", "MTN", "PAYPAL"])("rejects operator %s", (operator) => {
+        expect(paymentDetailsSchema.safeParse({ ...payment, operator }).success).toBe(false);
     });
 
     // XAF has no cents
