@@ -21,8 +21,8 @@ export const gender = ["Male", "Female" , "Other"] as const;
 export const customerSchema = z.object({
   phone: z.e164(),
   firstName: z.string().min(1, { message: 'First name is required' }),
-  lastName: z.string().min(1).optional(),
-  email: z.email({ message: 'Invalid email address' }).optional(),
+  lastName: z.string().min(1).nullish(),
+  email: z.email({ message: 'Invalid email address' }).nullish(),
   gender: z.enum(['Male', 'Female', 'Other']).optional(), // must match the Prisma Gender enum
   dateOfBirth: z.coerce.date().optional(), // JSON sends dates as strings, coerce turns them into Date
 });

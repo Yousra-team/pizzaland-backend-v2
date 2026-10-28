@@ -6,6 +6,8 @@ import * as z from "zod";
 import { manyCustomerSchema, updateProfileSchema } from "../crm/crm.schema.js";
 import { CreateIdentifier } from "../utilities/counter.js";
 
+ const WELCOME_BONUS = 20;
+
 export const getAllEmployees = async (req: Request , res: Response) => {
     try{
          const employees = await prisma.employees.findMany()
@@ -138,8 +140,8 @@ export const createManyCustomers = async (req: Request, res: Response): Promise<
     for (const c of newCustomers) {
       c.customerId = await CreateIdentifier("CUST");
     }
-
-    const newAccounts = newCustomers.map((c) => ({ customerId: c.customerId }));
+   
+    const newAccounts = newCustomers.map((c) => ({ customerId: c.customerId , balance: WELCOME_BONUS}));
 
     const inserted = await prisma.$transaction(async (tx) => {
       const createdCustomers = await tx.customers.createMany({ data: newCustomers });
