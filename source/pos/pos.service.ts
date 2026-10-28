@@ -20,13 +20,12 @@ export const myCashierOrWaitressHistory = async (req: Request, res: Response) =>
             return;
         }
 
-        if (employee.role !== "CASHIER" && employee.role !== "WAITER") {
-            res.status(403).json({
-                error: { message: "Only cashiers and waiters can access this" },
-            });
-            return;
-        }
-
+        if (employee.role !== "CASHIER" && employee.role !== "WAITER" && employee.role !== "MANAGER") {
+             res.status(403).json({
+            error: { message: "Only cashiers, waiters, and managers can access this" },
+          });
+        return;
+}
         // Who placed an order lives on the first OrderStatusHistory row:
         //   fromStatus = null, toStatus = pending, changedByEmail = this employee.
         // So "orders I placed" = orders that have such a row for me.

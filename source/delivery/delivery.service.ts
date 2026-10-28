@@ -115,23 +115,23 @@ export const findDrivers = async (req: Request, res: Response): Promise<void> =>
             return;
         }
 
-        const cashier = await prisma.employees.findUnique({
+        const cashierOrManager = await prisma.employees.findUnique({
             where: { email: myEmail },
             select: { branchId: true }
         });
 
-        if (!cashier) {
+        if (!cashierOrManager) {
             res.status(404).json({ message: "No cashier with this email exists" })
             return;
         }
 
-        if (!cashier.branchId) {
+        if (!cashierOrManager.branchId) {
             res.status(400).json({ message: "Cashier is not assigned to a branch" })
             return;
         }
 
         const drivers = await prisma.employees.findMany({
-            where: { role: "DELIVERY_DRIVER", branchId: cashier.branchId }
+            where: { role: "DELIVERY_DRIVER", branchId: cashierOrManager.branchId }
         });
 
         res.status(200).json(drivers)

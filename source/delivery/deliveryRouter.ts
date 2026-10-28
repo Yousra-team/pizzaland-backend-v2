@@ -1,5 +1,5 @@
 import {Router} from "express";
-import { getAvailableDeliveries, claimDelivery, getMyDeliveries, updateDeliveryStatus, assignDeliveryToDriver } from "./delivery.service.js";
+import { getAvailableDeliveries, claimDelivery, getMyDeliveries, updateDeliveryStatus, assignDeliveryToDriver, findDrivers } from "./delivery.service.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import roleMiddleware from "../middlewares/role.middleware.js";
 
@@ -13,5 +13,6 @@ router.get("/mine", getMyDeliveries);          // ?view=history for delivered/fa
 router.patch("/:deliveryId/claim", claimDelivery);
 router.patch("/:deliveryId/status", updateDeliveryStatus);
 router.patch("/assign", assignDeliveryToDriver)
+router.get("/drivers" , authMiddleware, roleMiddleware("CASHIER", "MANAGER") , findDrivers)
 
 export default router;
