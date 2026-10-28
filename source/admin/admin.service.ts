@@ -3,7 +3,8 @@ import {prisma} from "../lib/prisma.js"
 import { fullOrderInclude } from "../orders/order.include.js";
 import { updateEmployeeSchema } from "./admin.schema.js";
 import * as z from "zod";
-import { updateProfileSchema } from "../crm/crm.schema.js";
+import { manyCustomerSchema, updateProfileSchema } from "../crm/crm.schema.js";
+import { CreateIdentifier } from "../utilities/counter.js";
 
 export const getAllEmployees = async (req: Request , res: Response) => {
     try{
@@ -81,7 +82,7 @@ export const getAllOrders = async (req: Request, res: Response) => {
 
 // Update 
 
-export const updateEmployees = async (req: Request , res: Response) => {
+export const updateEmployees = async (req: Request , res: Response): Promise<void> => {
     try {
          const result = updateEmployeeSchema.safeParse(req.body)
          
@@ -107,3 +108,51 @@ export const updateEmployees = async (req: Request , res: Response) => {
     }
 };
 
+
+export const createManyCustomers = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = manyCustomerSchema.safeParse(req.body);
+    if (!result.success) {
+      const fieldErrors = z.flattenError(result.error);
+      res.status(400).json({
+        error: { message: "Error in creating customers in bulk", details: fieldErrors.fieldErrors },
+      });
+      return;
+    }
+
+    const data = result.data;
+
+    // Find existing phones in one query
+    const existing = await prisma.customers.findMany({
+      where: { phone: { in: data.map((c) => c.phone) } },
+      select: { phone: true },
+    });
+    const existingPhones = existing.map((e) => e.phone);
+
+    // Keep only customers not already in V2, and give each one an empty customerId slot
+    const newCustomers = data
+      .filter((c) => !existingPhones.includes(c.phone))
+      .map((c) => ({ customerId: "", ...c }));
+
+    // Fill in the real IDs one at a time
+    for (const c of newCustomers) {
+      c.customerId = await CreateIdentifier("CUST");
+    }
+
+    const newAccounts = newCustomers.map((c) => ({ customerId: c.customerId }));
+
+    const inserted = await prisma.$transaction(async (tx) => {
+      const createdCustomers = await tx.customers.createMany({ data: newCustomers });
+      await tx.accounts.createMany({ data: newAccounts });
+      return createdCustomers;
+    });
+
+    res.status(201).json({
+      data: { inserted: inserted.count },
+      meta: { received: data.length, skippedDuplicates: data.length - inserted.count },
+    });
+  } catch (error) {
+    console.error("createManyCustomers failed:", error);
+    res.status(500).json({ error: { message: "Failed to create customers in bulk" } });
+  }
+};

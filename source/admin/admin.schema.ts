@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { manyCustomerSchema } from "../crm/crm.schema.js";
 
 export const roles = [ "ADMIN",
         "CASHIER",
@@ -33,3 +34,4 @@ export  const updateEmployeeSchema = z.object({
     role: z.enum(roles).optional(),
     branchId: z.string().optional(),
 });
+

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllAddons, getAllCategories, getAllEmployees, getAllMenus, getAllOrders, getAllProducts, getAllsubcategories, updateEmployees } from "./admin.service.js";
+import { createManyCustomers, getAllAddons, getAllCategories, getAllEmployees, getAllMenus, getAllOrders, getAllProducts, getAllsubcategories, updateEmployees } from "./admin.service.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import roleMiddleware from "../middlewares/role.middleware.js";
 
@@ -17,4 +17,6 @@ router.get("/orders", authMiddleware , roleMiddleware("ADMIN"), getAllOrders)
 //update
 router.patch("/employees" ,authMiddleware , roleMiddleware("ADMIN"), updateEmployees)
 
+//create
+router.post("/customers/bulk" , createManyCustomers)
 export default router

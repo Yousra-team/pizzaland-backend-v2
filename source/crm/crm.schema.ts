@@ -19,12 +19,16 @@ export const gender = ["Male", "Female" , "Other"] as const;
 
 // `verified` is not here on purpose: only the server decides if a customer is verified
 export const customerSchema = z.object({
+  phone: z.e164(),
   firstName: z.string().min(1, { message: 'First name is required' }),
   lastName: z.string().min(1).optional(),
   email: z.email({ message: 'Invalid email address' }).optional(),
   gender: z.enum(['Male', 'Female', 'Other']).optional(), // must match the Prisma Gender enum
   dateOfBirth: z.coerce.date().optional(), // JSON sends dates as strings, coerce turns them into Date
 });
+
+export const manyCustomerSchema = z.array(customerSchema).min(1).max(1000);
+
 
 // customerPhone is never in these schemas: it comes from the logged-in user's token
 export const favoriteSchema = z.object({

@@ -224,9 +224,9 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
         }
               
     const authToken = await signAccessToken({Id: customer.customerId , role:"CUSTOMER"})
-    const refreshToken = await signRefreshToken({Id: customer.customerId, role:"CUSTOMER"})
+    /*const refreshToken = await signRefreshToken({Id: customer.customerId, role:"CUSTOMER"})
 
-    await prisma.token.create({
+   await prisma.token.create({
             data:{
                token: refreshToken,
                customerId: customer.customerId,
@@ -241,9 +241,9 @@ export const verifyCustomer = async (req: Request , res: Response): Promise<void
                 secure: true,       // HTTPS only
                 sameSite: "strict",
                 maxAge: 7 * 24 * 60 * 60 * 1000,
-         });
+         });*/
 
-        res.status(200).json({message: "Customer verified" , authToken});
+        res.status(200).json({message: "Customer verified" , authToken , profile: customer});
         console.log("Verification Was Successful")
         return
 
@@ -275,7 +275,7 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
         }
 
        const authToken = await signAccessToken({Id: email , role: existingEmployee.role})
-       const refreshToken = await signRefreshToken({Id: email , role: existingEmployee.role})
+      /* const refreshToken = await signRefreshToken({Id: email , role: existingEmployee.role})
 
         await prisma.token.create({
                 data:{
@@ -293,7 +293,7 @@ export const loginEmployee = async (req: Request, res: Response): Promise<void> 
                   secure: true,       // HTTPS only
                   sameSite: "strict",
                  maxAge: 7 * 24 * 60 * 60 * 1000,
-              });
+              }); */
 
         res.status(200).json({message:`Log in successful` , authToken})
     }catch (error) {
@@ -359,7 +359,7 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
         }
       */
         const authToken = await signAccessToken({Id: email , role: existingAdmin.role})
-       const refreshToken = await signRefreshToken({Id: email , role: existingAdmin.role})
+       /*const refreshToken = await signRefreshToken({Id: email , role: existingAdmin.role})
 
         await prisma.token.create({
                 data:{
@@ -377,7 +377,7 @@ export const loginAdmin = async (req : Request , res: Response): Promise<void> =
                   secure: true,       // HTTPS only
                   sameSite: "strict",
                  maxAge: 7 * 24 * 60 * 60 * 1000,
-              });
+              });*/
 
         res.status(200).json({message:`Log in successful` , authToken})
     }catch (error) {
